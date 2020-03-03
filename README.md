@@ -281,9 +281,6 @@ This library requires the following external dependencies:
 *   [Protocol Buffers](https://github.com/google/protobuf) for data
     serialization.
 
-*   [Tink](https://github.com/google/tink) for underlying
-    cryptographic operations.
-
 ## How to Build
 
 In order to run the SHELL library, you need to install Bazel, if you don't have
