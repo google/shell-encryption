@@ -12,33 +12,30 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#include "ntt_parameters.h"
+
+#ifndef RLWE_PRNG_H_
+#define RLWE_PRNG_H_
+
+#include <cstdint>
+
+#include "absl/strings/string_view.h"
+#include "integral_types.h"
+#include "statusor.h"
 
 namespace rlwe {
-namespace internal {
 
-// Bit reverse only among the rightmost log_n bytes.
-unsigned int Bitrev(unsigned int input, unsigned int log_n) {
-  unsigned int output = 0;
-  for (unsigned int i = 0; i < log_n; i++) {
-    output <<= 1;
-    output |= input & 0x01;
-    input >>= 1;
-  }
+// An interface for a secure pseudo-random number generator.
+class SecurePrng {
+ public:
+  virtual rlwe::StatusOr<Uint8> Rand8() = 0;
+  virtual rlwe::StatusOr<Uint64> Rand64() = 0;
+  virtual ~SecurePrng() = default;
+  static rlwe::StatusOr<std::unique_ptr<SecurePrng>> Create(
+      absl::string_view seed);
+  static rlwe::StatusOr<std::string> GenerateSeed();
+  static int SeedLength();
+};
 
-  return output;
-}
-
-std::vector<unsigned int> BitrevArray(unsigned int log_n) {
-  unsigned int n = 1 << log_n;
-  std::vector<unsigned int> output(n);
-
-  for (unsigned int i = 0; i < n; i++) {
-    output[i] = Bitrev(i, log_n);
-  }
-
-  return output;
-}
-
-}  // namespace internal
 }  // namespace rlwe
+
+#endif  // RLWE_PRNG_H_

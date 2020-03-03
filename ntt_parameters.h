@@ -1,5 +1,5 @@
 /*
- * Copyright 2017 Google Inc.
+ * Copyright 2017 Google LLC.
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -16,155 +16,79 @@
 #define RLWE_NTT_PARAMETERS_H_
 
 #include <algorithm>
+#include <cstdlib>
 #include <vector>
+
+#include "absl/memory/memory.h"
+#include "absl/strings/str_cat.h"
+#include "constants.h"
+#include "status_macros.h"
+#include "statusor.h"
 
 namespace rlwe {
 namespace internal {
 
 // Fill row with every power in {0, 1, ..., n-1} (mod modulus) of base .
 template <typename ModularInt>
-std::vector<ModularInt> FillWithEveryPower(
-    const typename ModularInt::Params* params, ModularInt base,
-    unsigned int n) {
-  std::vector<ModularInt> row(n, ModularInt::ImportInt(params, 0));
+void FillWithEveryPower(const ModularInt& base, unsigned int n,
+                        std::vector<ModularInt>* row,
+                        typename ModularInt::Params* params) {
   for (int i = 0; i < n; i++) {
-    row[i] = base ^ i;
+    (*row)[i].AddInPlace(base.ModExp(i, params), params);
   }
-
-  return row;
 }
 
 template <typename ModularInt>
-ModularInt PrimitiveNthRootOfUnity(const typename ModularInt::Params* params,
-                                   unsigned int log_n) {
-  unsigned int n = 1 << log_n;
-  unsigned int half_n = n >> 1;
+rlwe::StatusOr<ModularInt> PrimitiveNthRootOfUnity(
+    unsigned int log_n, typename ModularInt::Params* params) {
+  typename ModularInt::Int n = params->One() << log_n;
+  typename ModularInt::Int half_n = n >> 1;
 
-  // The value k is a power such that any number raised to it will be a
-  // n-th root of unity. (It will not necessarily be a *primitive* root of
-  // unity, however).
-  typename ModularInt::Int k = (params->modulus - 1) / n;
+  // When the modulus is prime, the value k is a power such that any number
+  // raised to it will be a n-th root of unity. (It will not necessarily be a
+  // *primitive* root of unity, however).
+  typename ModularInt::Int k = (params->modulus - params->One()) / n;
 
-  // Test each number t to see whether t^k is a primitive 2n-th root
+  // Test each number t to see whether t^k is a primitive n-th root
   // of unity - that t^{nk} is a root of unity but t^{(n/2)k} is not.
-  ModularInt one = ModularInt::ImportInt(params, 1);
-  for (typename ModularInt::Int t = 2; t < params->modulus; t++) {
+  ModularInt one = ModularInt::ImportOne(params);
+  for (typename ModularInt::Int t = params->Two(); t < params->modulus;
+       t = t + params->One()) {
     // Produce a candidate root of unity.
-    ModularInt candidate = ModularInt::ImportInt(params, t) ^ k;
+    RLWE_ASSIGN_OR_RETURN(auto mt, ModularInt::ImportInt(t, params));
+    ModularInt candidate = mt.ModExp(k, params);
 
-    // Check whether candidate^n = 1. If not, it is a primitive root of unity.
-    if ((candidate ^ half_n) != one) {
+    // Check whether candidate^half_n = 1. If not, it is a primitive root of
+    // unity.
+    if (candidate.ModExp(half_n, params) != one) {
       return candidate;
     }
   }
 
   // Failure state. The above loop should always return successfully assuming
   // the parameters were set properly.
-  abort();
+  return absl::UnknownError("Loop in PrimitiveNthRootOfUnity terminated.");
 }
 
-}  // namespace internal
-
-// Creates the vector of psis. When performing the NTT transformation on a
-// degree n-1 polynomial, psi is the primitive 2n-th root of unity. This
-// function produces a vector of length n containing every power of psi between
-// 0 and n-1. In other words, the vector produced by this function is:
-//
-//     {psi^0, psi^1, psi^2, ..., psi^(n-1)}
-//
-// As the first step of the NTT transformation,
-// each element in the vector is multiplied by the corresponding element of the
-// of the polynomial (i.e., psi^i * the coefficient for the x^i term).
+// Let psi be a primitive 2n-th root of unity, i.e., a 2n-th root of unity such
+// that psi^n = -1. When performing the NTT transformation, the powers of psi in
+// bitreversed order are needed. The vector produced by this helper function
+// contains the powers of psi (psi^0, psi^1, psi^2, ..., psi^(n-1)).
 //
 // Each item of the vector is in modular integer representation.
 template <typename ModularInt>
-std::vector<ModularInt> NttPsis(const typename ModularInt::Params* params,
-                                unsigned int log_n) {
-  // Obtain a primitive 2n-th root of unity (hence log_n + 1).
-  ModularInt w_2n =
-      internal::PrimitiveNthRootOfUnity<ModularInt>(params, log_n + 1);
+rlwe::StatusOr<std::vector<ModularInt>> NttPsis(
+    unsigned int log_n, typename ModularInt::Params* params) {
+  // Obtain psi, a primitive 2n-th root of unity (hence log_n + 1).
+  RLWE_ASSIGN_OR_RETURN(
+      ModularInt psi,
+      internal::PrimitiveNthRootOfUnity<ModularInt>(log_n + 1, params));
   unsigned int n = 1 << log_n;
-
-  return internal::FillWithEveryPower<ModularInt>(params, w_2n, n);
-}
-
-// Creates a vector of the powers of psi^(-1), which is used in the inverse
-// NTT transformation to invert the use of the psis from NttPsis. Each of these
-// values is multiplied by the multiplicative inverse of n, which is necessary
-// as part of the inverse NTT transformation.
-template <typename ModularInt>
-std::vector<ModularInt> NttPsisInv(const typename ModularInt::Params* params,
-                                   unsigned int log_n) {
-  unsigned int n = 1 << log_n;
-  auto n_inv = ModularInt::ImportInt(params, n).MultiplicativeInverse();
-  std::vector<ModularInt> row = NttPsis<ModularInt>(params, log_n);
-
-  // Reverse the items at indices 1 through (n - 1). Multiplying index i
-  // of the reversed row by index i of the original row will yield w_2n^n = -1.
-  // (The exception is w_2n^0 = 1, which is already its own inverse.)
-  std::reverse(row.begin() + 1, row.end());
-
-  // Finally, multiply each of the items at indices 1 to (n-1) by -1. Multiply
-  // every entry by n_inv.
-  row[0] = row[0] * n_inv;
-  for (int i = 1; i < n; i++) {
-    row[i] = -row[i] * n_inv;
-  }
-
+  ModularInt zero = ModularInt::ImportZero(params);
+  // Create a vector with the powers of psi.
+  std::vector<ModularInt> row(n, zero);
+  internal::FillWithEveryPower<ModularInt>(psi, n, &row, params);
   return row;
-}
-
-// Creates the table of omegas. Let omega_t be the primitive t-th root of unity
-// for a given value of t. The j-th nested vector of this function's output
-// table contains the powers from 0 to n-1 of (2^(j+1))-th primitive root of
-// unity. In other words, the item at index (j, k) of the nested vectors is
-// the (2^(j+1))-th primitive root of unity to the k^th power.
-//
-// Each item of the table is in modular integer representation.
-//
-// This table provides the omega values that are necessary to run the forward
-// NTT transformation.
-template <typename ModularInt>
-std::vector<std::vector<ModularInt>> NttOmegas(
-    const typename ModularInt::Params* params, unsigned int log_n) {
-  unsigned int n = 1 << log_n;
-
-  // Nested vectors that store a table of the primitive roots of unity and
-  // their powers. Specifically, output[i][j] is the (2^(i+1))-th primitive root
-  // of unity to the j-th power.
-  std::vector<std::vector<ModularInt>> output(
-      log_n, std::vector<ModularInt>(n, ModularInt::ImportInt(params, 0)));
-
-  for (int row = log_n; row > 0; row--) {
-    ModularInt w = internal::PrimitiveNthRootOfUnity<ModularInt>(params, row);
-    output[row - 1] = internal::FillWithEveryPower<ModularInt>(params, w, n);
-  }
-
-  return output;
-}
-
-// Generates the omegas for the inverse  NTT transformation.
-// Each row of the table will be the powers of the inverse
-// of the corresponding primitive root of unity, producing the table necessary
-// for the inverse NTT transformation.
-//
-// See NttOmegas for the structure of this table: index (i, j) of the output
-// of this function is the multiplicative inverse of index (i, j) of the output
-// of NttOmegas.
-template <typename ModularInt>
-std::vector<std::vector<ModularInt>> NttOmegasInv(
-    const typename ModularInt::Params* params, unsigned int log_n) {
-  // Retrieve the table for the forward transformation.
-  std::vector<std::vector<ModularInt>> table =
-      NttOmegas<ModularInt>(params, log_n);
-
-  // The table for the reverse transformation is entries 1 through (n-1) in
-  // reverse. The first entry in the table is 1, which is its own inverse.
-  for (std::vector<ModularInt>& row : table) {
-    std::reverse(row.begin() + 1, row.end());
-  }
-
-  return table;
 }
 
 // Creates a vector containing the indices necessary to perform the NTT bit
@@ -172,28 +96,123 @@ std::vector<std::vector<ModularInt>> NttOmegasInv(
 // the rightmost log_n bits of i reversed.
 std::vector<unsigned int> BitrevArray(unsigned int log_n);
 
+// Helper function: Perform the bit-reversal operation in-place on coeffs_.
+template <typename ModularInt>
+static void BitrevHelper(const std::vector<unsigned int>& bitrevs,
+                         std::vector<ModularInt>* item_to_reverse) {
+  using std::swap;
+  for (int i = 0; i < item_to_reverse->size(); i++) {
+    // Only swap in one direction - don't accidentally swap twice.
+    if (unsigned int r = bitrevs[i]; i < r) {
+      swap((*item_to_reverse)[i], (*item_to_reverse)[r]);
+    }
+  }
+}
+
+}  // namespace internal
+
+// The precomputed roots of unity used during the forward NTT are the
+// bitreversed powers of the primitive 2n-th root of unity.
+template <typename ModularInt>
+rlwe::StatusOr<std::vector<ModularInt>> NttPsisBitrev(
+    unsigned int log_n, typename ModularInt::Params* params) {
+  // Retrieve the table for the forward transformation.
+  RLWE_ASSIGN_OR_RETURN(std::vector<ModularInt> psis,
+                        internal::NttPsis<ModularInt>(log_n, params));
+  // Bitreverse the vector.
+  internal::BitrevHelper(internal::BitrevArray(log_n), &psis);
+  return psis;
+}
+
+// The precomputed roots of unity used during the inverse NTT are the inverses
+// of the bitreversed powers of the primitive 2n-th root of unity plus 1.
+template <typename ModularInt>
+rlwe::StatusOr<std::vector<ModularInt>> NttPsisInvBitrev(
+    unsigned int log_n, typename ModularInt::Params* params) {
+  // Retrieve the table for the forward transformation.
+  RLWE_ASSIGN_OR_RETURN(std::vector<ModularInt> row,
+                        internal::NttPsis<ModularInt>(log_n, params));
+
+  // Reverse the items at indices 1 through (n - 1). Multiplying index i
+  // of the reversed row by index i of the original row will yield psi^n = -1.
+  // (The exception is psi^0 = 1, which is already its own inverse.)
+  std::reverse(row.begin() + 1, row.end());
+
+  // Get the inverse of psi
+  ModularInt psi_inv = row[1].Negate(params);
+  ModularInt negative_psi_inv = row[1];
+
+  // Bitreverse the vector.
+  internal::BitrevHelper(internal::BitrevArray(log_n), &row);
+
+  // Finally, multiply each of the items at indices 1 to (n-1) by -1. Multiply
+  // every entry by psi_inv.
+  row[0].MulInPlace(psi_inv, params);
+  for (int i = 1; i < row.size(); i++) {
+    row[i].MulInPlace(negative_psi_inv, params);
+  }
+
+  return row;
+}
+
 // A struct that stores a package of NTT Parameters
 template <typename ModularInt>
 struct NttParameters {
-  std::vector<ModularInt> psis;
-  std::vector<ModularInt> psis_inv;
-  std::vector<std::vector<ModularInt>> omegas;
-  std::vector<std::vector<ModularInt>> omegas_inv;
+  NttParameters() = default;
+  // Disallow copy and copy-assign, allow move and move-assign.
+  NttParameters(const NttParameters<ModularInt>&) = delete;
+  NttParameters& operator=(const NttParameters<ModularInt>&) = delete;
+  NttParameters(NttParameters<ModularInt>&&) = default;
+  NttParameters& operator=(NttParameters<ModularInt>&&) = default;
+  ~NttParameters() = default;
+
+  int number_coeffs;
+  std::unique_ptr<ModularInt> n_inv_ptr;
+  std::vector<ModularInt> psis_bitrev;
+  std::vector<ModularInt> psis_inv_bitrev;
   std::vector<unsigned int> bitrevs;
 };
 
 // A convenient function that sets up all NTT parameters at once.
 // Does not take ownership of params.
 template <typename ModularInt>
-NttParameters<ModularInt> InitializeNttParameters(
-    const typename ModularInt::Params* params, int log_n) {
+rlwe::StatusOr<NttParameters<ModularInt>> InitializeNttParameters(
+    int log_n, typename ModularInt::Params* params) {
+  // Abort if log_n is non-positive.
+  if (log_n <= 0) {
+    return absl::InvalidArgumentError("log_n must be positive");
+  } else if (log_n > kMaxLogNumCoeffs) {
+    return absl::InvalidArgumentError(absl::StrCat(
+        "log_n, ", log_n, ", must be less than ", kMaxLogNumCoeffs, "."));
+  }
+
+  if (!ModularInt::Params::DoesLogNFit(log_n)) {
+    return absl::InvalidArgumentError(
+        absl::StrCat("log_n, ", log_n,
+                     ", does not fit into underlying ModularInt::Int type."));
+  }
+
   NttParameters<ModularInt> output;
 
-  output.psis = NttPsis<ModularInt>(params, log_n);
-  output.psis_inv = NttPsisInv<ModularInt>(params, log_n);
-  output.omegas = NttOmegas<ModularInt>(params, log_n);
-  output.omegas_inv = NttOmegasInv<ModularInt>(params, log_n);
-  output.bitrevs = BitrevArray(log_n);
+  output.number_coeffs = 1 << log_n;
+  typename ModularInt::Int two_times_n = params->One() << (log_n + 1);
+
+  if (params->modulus % two_times_n != params->One()){
+    return absl::InvalidArgumentError(
+        absl::StrCat("modulus is not 1 mod 2n for logn, ", log_n));
+  }
+
+  // 1-dimensional vector containing the inverse of n
+  typename ModularInt::Int n = params->One() << log_n;
+  RLWE_ASSIGN_OR_RETURN(auto mn, ModularInt::ImportInt(n, params));
+  auto minv = mn.MultiplicativeInverse(params);
+  output.n_inv_ptr = absl::make_unique<ModularInt>(minv);
+
+  RLWE_ASSIGN_OR_RETURN(output.psis_bitrev,
+                        NttPsisBitrev<ModularInt>(log_n, params));
+  RLWE_ASSIGN_OR_RETURN(output.psis_inv_bitrev,
+                        NttPsisInvBitrev<ModularInt>(log_n, params));
+  output.bitrevs = internal::BitrevArray(log_n);
 
   return output;
 }

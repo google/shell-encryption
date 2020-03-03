@@ -17,14 +17,50 @@ syntax = "proto2";
 
 package rlwe;
 
-message SerializedModularInt {
-  optional bytes payload = 1;  // required
-}
-
+// NTT Polynomial
 message SerializedNttPolynomial {
-  repeated SerializedModularInt coeffs = 1;
+  // Coefficients of the polynomial
+  optional bytes coeffs = 1;
+
+  // Number of coefficients of the polynomial.
+  optional int32 num_coeffs = 2;
 }
 
+// RLWE Ciphertext
 message SerializedSymmetricRlweCiphertext {
+  // Polynomials composing the ciphertext
   repeated SerializedNttPolynomial c = 1;
+
+  // The power of the secret key that the ciphertext is encrypted with.
+  optional int32 power_of_s = 2;
+
+  // A heuristic on the amount of error in the ciphertext.
+  optional double error = 3;
+}
+
+// RLWE RelinearizationKey
+message SerializedRelinearizationKey {
+  // Polynomial composing the matrix
+  repeated SerializedNttPolynomial c = 1;
+
+  // The modulus used to decompose the coefficients of the polynomials. Ranges
+  // from 1 to the number of bits of the modulus.
+  optional int32 log_decomposition_modulus = 2;
+
+  // For n parts, the key can relinearize an n-component ciphertext to a
+  // 2-component ciphertext.
+  optional int32 num_parts = 3;
+
+  // Seed used to compress this key.
+  optional bytes prng_seed = 4;  // Required
+
+  // The power of s that corresponds to the key. The field is 1 if the key is
+  // RelinearizationKey.
+  optional int32 power_of_s = 5;
+}
+
+// RLWE GaloisKeys.
+message SerializedGaloisKey {
+  // The key-switching matrix
+  optional SerializedRelinearizationKey key = 1;
 }

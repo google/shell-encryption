@@ -86,9 +86,11 @@ distribution *Y*.
 A message *m* that is to be encrypted must be a polynomial with *n*
 coefficients, each of which is smaller than *t*.
 
-To encrypt *m* with key *s*, select a polynomial *e* from the distribution *Y*.
-*e* is a random amount of error that makes it difficult to extract the error
-from the ciphertext.
+To encrypt *m* with key *s*, select a polynomial *e* from the distribution *Y*
+and a polynomial *a* from the uniform distribution (each coefficient of *a* is
+chosen uniformly at random). *e* is a random amount of error that makes it
+difficult to extract the error from the ciphertext. Both *a* and *e* are nonces
+that should be regenerated freshly for each encryption.
 
 The ciphertext consists of two polynomials. The first polynomial
 *c<sub>0</sub> = as + m + et*. The second polynomial *c<sub>1</sub> = -a*. The
@@ -119,7 +121,7 @@ If we let *a<sub>z</sub>* = *a<sub>x</sub> + a<sub>y</sub>* and
 m<sub>z</sub> + e<sub>z</sub>t, -a<sub>z</sub>)*, which is just another
 ciphertext encrypting the sum of the original messages.
 
-### Homomorphic Absorbtion
+### Homomorphic Absorption
 
 We can multiply a ciphertext containing the message *m* by another unencrypted
 polynomial *p* to get the encryption of the message *mp*. To do so, we simply
@@ -239,7 +241,7 @@ values have been chosen for several common moduli in `constants.h`.
 
 ### NTT Polynomial
 
-This library is implemented in `ntt_polynomial.h`. We store all polynomials in
+This library is implemented in `polynomial.h`. We store all polynomials in
 NTT (Number-Theoretic Transformation) form. A polynomial multiplication on
 standard polynomials can be computed with a coefficient-wise product on the same
 polynomials in NTT form, reducing the complexity of the operation from
@@ -262,20 +264,64 @@ operates on polynomials in NTT form.
 
 This library requires the following external dependencies:
 
+*   [Abseil](https://github.com/abseil/abseil-cpp) for C++ common libraries.
+
 *   [Bazel](https://github.com/bazelbuild/bazel) for building the library.
 
+*   [BoringSSL](https://github.com/google/boringssl) for underlying
+    cryptographic operations.
+
+*   [GFlag](https://github.com/gflags/gflags) for flags. Needed to use glog.
+
+*   [GLog](https://github.com/google/glog) for logging.
+
 *   [Google Test](https://github.com/google/googletest) for unit testing the
-    library. Bazel will automatically download Google Test from Github.
-    
+    library.
+
 *   [Protocol Buffers](https://github.com/google/protobuf) for data
-    serialization. Bazel will automatically download Protocol Buffers from
-    Github.
+    serialization.
+
+*   [Tink](https://github.com/google/tink) for underlying
+    cryptographic operations.
+
+## How to Build
+
+In order to run the SHELL library, you need to install Bazel, if you don't have
+it already.
+[Follow the instructions for your platform on the Bazel website.](https://docs.bazel.build/versions/master/install.html)
+
+You also need to install Git, if you don't have it already.
+[Follow the instructions for your platform on the Git website.](https://git-scm.com/book/en/v2/Getting-Started-Installing-Git)
+
+Once you've installed Bazel and Git, open a Terminal and clone the SHELL
+repository into a local folder:
+
+```shell
+git clone https://github.com/google/shell-encryption.git
+```
+
+Navigate into the `shell-encryption` folder you just created, and build the
+SHELL library and dependencies using Bazel. Note, the library must be built
+using C++17.
+
+```bash
+cd shell-encryption
+bazel build :all --cxxopt='-std=c++17'
+```
+
+You may also run all tests using the following command:
+
+```bash
+bazel test :all --cxxopt='-std=c++17'
+```
+
+If you get an error, you may need to build/test with the following flags:
+
+```bash
+bazel build :all --cxxopt='-std=c++17' --incompatible_disable_deprecated_attr_params=false --incompatible_depset_is_not_iterable=false --incompatible_new_actions_api=false --incompatible_no_support_tools_in_action_inputs=false
+```
 
 ## Acknowledgements
 
-Although this library was written independently, the organization and several of
-the optimizations present in this library were drawn from the code underlying
-the New Hope RLWE key exchange protocol. This library benefited greatly from
-both the [New Hope paper](https://eprint.iacr.org/2015/1092) and [New Hope
-codebase](https://github.com/tpoeppelmann/newhope). We also thank Jonathan
-Frankle, who led the development of this library during an internship at Google.
+We also thank Jonathan Frankle, who contributed to this library during an
+internship at Google.
