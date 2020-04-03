@@ -24,7 +24,7 @@ cc_library(
     deps = [
         "//:integral_types",
         "//:statusor_fork",
-        "@com_google_absl//absl/strings",
+        "@com_github_abseil_abseil-cpp//absl/strings",
     ],
 )
 
@@ -44,7 +44,7 @@ cc_library(
     deps = [
         ":chacha_prng",
         ":single_thread_chacha_prng",
-        "@com_google_googletest//:gtest",
+        "@com_github_google_googletest//:gtest",
     ],
 )
 
@@ -61,8 +61,8 @@ cc_test(
         ":integral_prng_types",
         "//testing:matchers",
         "//testing:status_testing",
-        "@com_google_absl//absl/strings",
-        "@com_google_googletest//:gtest_main",
+        "@com_github_abseil_abseil-cpp//absl/strings",
+        "@com_github_google_googletest//:gtest_main",
     ],
 )
 
@@ -78,10 +78,10 @@ cc_library(
         ":chacha_prng_util",
         ":prng",
         "//:statusor_fork",
-        "@com_google_absl//absl/base:core_headers",
-        "@com_google_absl//absl/memory",
-        "@com_google_absl//absl/strings",
-        "@com_google_absl//absl/synchronization",
+        "@com_github_abseil_abseil-cpp//absl/base:core_headers",
+        "@com_github_abseil_abseil-cpp//absl/memory",
+        "@com_github_abseil_abseil-cpp//absl/strings",
+        "@com_github_abseil_abseil-cpp//absl/synchronization",
     ],
 )
 
@@ -93,8 +93,8 @@ cc_library(
         ":chacha_prng_util",
         ":prng",
         "//:statusor_fork",
-        "@com_google_absl//absl/memory",
-        "@com_google_absl//absl/strings",
+        "@com_github_abseil_abseil-cpp//absl/memory",
+        "@com_github_abseil_abseil-cpp//absl/strings",
     ],
 )
 
@@ -108,9 +108,9 @@ cc_library(
         "//:integral_types",
         "//:statusor_fork",
         "@boringssl//:ssl",
-        "@com_google_absl//absl/memory",
-        "@com_google_absl//absl/status",
-        "@com_google_absl//absl/strings",
+        "@com_github_abseil_abseil-cpp//absl/memory",
+        "@com_github_abseil_abseil-cpp//absl/status",
+        "@com_github_abseil_abseil-cpp//absl/strings",
     ],
 )
 
@@ -124,8 +124,8 @@ cc_test(
         ":chacha_prng",
         "//testing:matchers",
         "//testing:status_testing",
-        "@com_google_absl//absl/strings",
-        "@com_google_googletest//:gtest_main",
+        "@com_github_abseil_abseil-cpp//absl/strings",
+        "@com_github_google_googletest//:gtest_main",
     ],
 )
 
@@ -139,7 +139,7 @@ cc_test(
         ":single_thread_chacha_prng",
         "//testing:matchers",
         "//testing:status_testing",
-        "@com_google_absl//absl/strings",
-        "@com_google_googletest//:gtest_main",
+        "@com_github_abseil_abseil-cpp//absl/strings",
+        "@com_github_google_googletest//:gtest_main",
     ],
 )
