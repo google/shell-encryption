@@ -78,10 +78,10 @@ class StatusOr {
   bool ok() const;
 
   // Returns a reference to our current value, or CHECK-fails if !this->ok().
-  ABSL_DEPRECATED("Use value() instead") const T& ValueOrDie() const&;
-  ABSL_DEPRECATED("Use value() instead") T& ValueOrDie() &;
-  ABSL_DEPRECATED("Use value() instead") const T&& ValueOrDie() const&&;
-  ABSL_DEPRECATED("Use value() instead") T&& ValueOrDie() &&;
+  const T& ValueOrDie() const&;
+  T& ValueOrDie() &;
+  const T&& ValueOrDie() const&&;
+  T&& ValueOrDie() &&;
 
   // Returns a reference to our current value, or CHECK-fails if !this->ok().
   const T& value() const&;

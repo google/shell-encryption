@@ -41,7 +41,7 @@ cc_library(
         ":error_params",
         ":ntt_parameters",
         ":statusor_fork",
-        "@com_github_abseil_abseil-cpp//absl/memory",
+        "@com_google_absl//absl/memory",
     ],
 )
 
@@ -57,8 +57,8 @@ cc_test(
         ":statusor_fork",
         "//testing:parameters",
         "//testing:status_testing",
-        "@com_github_abseil_abseil-cpp//absl/numeric:int128",
         "@com_github_google_googletest//:gtest_main",
+        "@com_google_absl//absl/numeric:int128",
     ],
 )
 
@@ -68,7 +68,7 @@ cc_library(
     name = "integral_types",
     hdrs = ["integral_types.h"],
     deps = [
-        "@com_github_abseil_abseil-cpp//absl/numeric:int128",
+        "@com_google_absl//absl/numeric:int128",
     ],
 )
 
@@ -79,7 +79,7 @@ cc_library(
     hdrs = ["constants.h"],
     deps = [
         ":integral_types",
-        "@com_github_abseil_abseil-cpp//absl/numeric:int128",
+        "@com_google_absl//absl/numeric:int128",
     ],
 )
 
@@ -90,7 +90,7 @@ cc_library(
     hdrs = ["bits_util.h"],
     deps = [
         ":integral_types",
-        "@com_github_abseil_abseil-cpp//absl/numeric:int128",
+        "@com_google_absl//absl/numeric:int128",
     ],
 )
 
@@ -100,8 +100,8 @@ cc_test(
     srcs = ["bits_util_test.cc"],
     deps = [
         ":bits_util",
-        "@com_github_abseil_abseil-cpp//absl/numeric:int128",
         "@com_github_google_googletest//:gtest_main",
+        "@com_google_absl//absl/numeric:int128",
     ],
 )
 
@@ -114,7 +114,7 @@ cc_library(
         ":error_params",
         ":statusor_fork",
         "//prng",
-        "@com_github_abseil_abseil-cpp//absl/strings",
+        "@com_google_absl//absl/strings",
     ],
 )
 
@@ -145,10 +145,10 @@ cc_library(
         "statusor.h",
     ],
     deps = [
-        "@com_github_abseil_abseil-cpp//absl/base:core_headers",
-        "@com_github_abseil_abseil-cpp//absl/status",
-        "@com_github_abseil_abseil-cpp//absl/types:optional",
         "@com_github_google_glog//:glog",
+        "@com_google_absl//absl/base:core_headers",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/types:optional",
     ],
 )
 
@@ -158,8 +158,8 @@ cc_test(
     srcs = ["statusor_test.cc"],
     deps = [
         ":statusor_fork",
-        "@com_github_abseil_abseil-cpp//absl/status",
         "@com_github_google_googletest//:gtest_main",
+        "@com_google_absl//absl/status",
     ],
 )
 
@@ -169,8 +169,8 @@ cc_test(
     srcs = ["status_macros_test.cc"],
     deps = [
         ":statusor_fork",
-        "@com_github_abseil_abseil-cpp//absl/status",
         "@com_github_google_googletest//:gtest_main",
+        "@com_google_absl//absl/status",
     ],
 )
 
@@ -188,9 +188,9 @@ cc_library(
         ":statusor_fork",
         ":transcription",
         "//prng",
-        "@com_github_abseil_abseil-cpp//absl/numeric:int128",
-        "@com_github_abseil_abseil-cpp//absl/strings",
         "@com_github_google_glog//:glog",
+        "@com_google_absl//absl/numeric:int128",
+        "@com_google_absl//absl/strings",
     ],
 )
 
@@ -209,8 +209,8 @@ cc_test(
         "//testing:status_is_fork",
         "//testing:status_testing",
         "//testing:testing_prng",
-        "@com_github_abseil_abseil-cpp//absl/numeric:int128",
         "@com_github_google_googletest//:gtest_main",
+        "@com_google_absl//absl/numeric:int128",
     ],
 )
 
@@ -223,8 +223,8 @@ cc_library(
     deps = [
         ":constants",
         ":statusor_fork",
-        "@com_github_abseil_abseil-cpp//absl/memory",
-        "@com_github_abseil_abseil-cpp//absl/strings",
+        "@com_google_absl//absl/memory",
+        "@com_google_absl//absl/strings",
     ],
 )
 
@@ -242,8 +242,8 @@ cc_test(
         "//testing:parameters",
         "//testing:status_is_fork",
         "//testing:status_testing",
-        "@com_github_abseil_abseil-cpp//absl/numeric:int128",
         "@com_github_google_googletest//:gtest_main",
+        "@com_google_absl//absl/numeric:int128",
     ],
 )
 
@@ -258,7 +258,7 @@ cc_library(
         ":serialization_cc_proto",
         ":statusor_fork",
         "//prng",
-        "@com_github_abseil_abseil-cpp//absl/strings",
+        "@com_google_absl//absl/strings",
     ],
 )
 
@@ -409,7 +409,7 @@ cc_library(
         ":symmetric_encryption",
         ":symmetric_encryption_with_prng",
         "//prng:integral_prng_types",
-        "@com_github_abseil_abseil-cpp//absl/numeric:int128",
+        "@com_google_absl//absl/numeric:int128",
     ],
 )
 
@@ -441,7 +441,7 @@ cc_library(
     deps = [
         ":relinearization_key",
         ":statusor_fork",
-        "@com_github_abseil_abseil-cpp//absl/strings",
+        "@com_google_absl//absl/strings",
     ],
 )
 
@@ -474,8 +474,8 @@ cc_library(
     hdrs = ["int256.h"],
     deps = [
         ":integral_types",
-        "@com_github_abseil_abseil-cpp//absl/numeric:int128",
         "@com_github_google_glog//:glog",
+        "@com_google_absl//absl/numeric:int128",
     ],
 )
 
@@ -485,10 +485,10 @@ cc_test(
     srcs = ["int256_test.cc"],
     deps = [
         ":int256",
-        "@com_github_abseil_abseil-cpp//absl/container:fixed_array",
-        "@com_github_abseil_abseil-cpp//absl/numeric:int128",
         "@com_github_google_glog//:glog",
         "@com_github_google_googletest//:gtest_main",
+        "@com_google_absl//absl/container:fixed_array",
+        "@com_google_absl//absl/numeric:int128",
     ],
 )
 
@@ -499,8 +499,8 @@ cc_library(
     hdrs = ["transcription.h"],
     deps = [
         ":statusor_fork",
-        "@com_github_abseil_abseil-cpp//absl/status",
-        "@com_github_abseil_abseil-cpp//absl/strings",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/strings",
     ],
 )
 
@@ -514,7 +514,7 @@ cc_test(
         ":transcription",
         "//testing:status_is_fork",
         "//testing:status_testing",
-        "@com_github_abseil_abseil-cpp//absl/numeric:int128",
         "@com_github_google_googletest//:gtest_main",
+        "@com_google_absl//absl/numeric:int128",
     ],
 )

@@ -39,11 +39,13 @@ git_repository(
 )
 
 # abseil-cpp
-git_repository(
-    name = "com_github_abseil_abseil-cpp",
-    commit = "df3ea785d8c30a9503321a3d35ee7d35808f190d",  # tag = "20200225.1"
-    remote = "https://github.com/abseil/abseil-cpp.git",
-    shallow_since = "1583355457 -0500",
+http_archive(
+    name = "com_google_absl",
+    sha256 = "728a813291bdec2aa46eab8356ace9f75ac2ed9dfe2df5ab603c4e6c09f1c353",
+    strip_prefix = "abseil-cpp-20200225",
+    urls = [
+         "https://github.com/abseil/abseil-cpp/archive/20200225.tar.gz",
+    ],
 )
 
 # BoringSSL
@@ -55,17 +57,17 @@ git_repository(
 )
 
 # Logging
-git_repository(
+http_archive(
     name = "com_github_google_glog",
-    commit = "96a2f23dca4cc7180821ca5f32e526314395d26a",  # tag = "v0.4.0"
-    remote = "https://github.com/google/glog.git",
-    shallow_since = "1553223106 +0900",
+    urls = ["https://github.com/google/glog/archive/96a2f23dca4cc7180821ca5f32e526314395d26a.zip"],
+    strip_prefix = "glog-96a2f23dca4cc7180821ca5f32e526314395d26a",
+    sha256 = "6281aa4eeecb9e932d7091f99872e7b26fa6aacece49c15ce5b14af2b7ec050f",
 )
 
 # gflags, needed for glog
-git_repository(
+http_archive(
     name = "com_github_gflags_gflags",
-    commit = "e171aa2d15ed9eb17054558e0b3a6a413bb01067",  # tag = "v2.2.2"
-    remote = "https://github.com/gflags/gflags.git",
-    shallow_since = "1541971260 +0000",
+    urls = ["https://github.com/gflags/gflags/archive/v2.2.2.tar.gz"],
+    sha256 = "34af2f15cf7367513b352bdcd2493ab14ce43692d2dcd9dfc499492966c64dcf",
+    strip_prefix = "gflags-2.2.2",
 )

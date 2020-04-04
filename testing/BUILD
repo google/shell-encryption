@@ -30,8 +30,8 @@ cc_library(
         "//:context",
         "//:integral_types",
         "//:montgomery",
-        "@com_github_abseil_abseil-cpp//absl/numeric:int128",
         "@com_github_google_googletest//:gtest",
+        "@com_google_absl//absl/numeric:int128",
     ],
 )
 
@@ -75,8 +75,8 @@ cc_library(
     ],
     deps = [
         "//:statusor_fork",
-        "@com_github_abseil_abseil-cpp//absl/status",
         "@com_github_google_googletest//:gtest",
+        "@com_google_absl//absl/status",
     ],
 )
 
@@ -89,8 +89,8 @@ cc_library(
     ],
     deps = [
         "//:statusor_fork",
-        "@com_github_abseil_abseil-cpp//absl/status",
         "@com_github_google_googletest//:gtest",
+        "@com_google_absl//absl/status",
     ],
 )
 
@@ -114,8 +114,8 @@ cc_library(
     deps = [
         ":coefficient_polynomial_cc_proto",
         "//:statusor_fork",
-        "@com_github_abseil_abseil-cpp//absl/strings",
         "@com_github_google_glog//:glog",
+        "@com_google_absl//absl/strings",
     ],
 )
 
