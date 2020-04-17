@@ -24,7 +24,8 @@
 #include <openssl/rand.h>
 #include "status_macros.h"
 
-namespace rlwe::internal {
+namespace rlwe {
+namespace internal {
 
 absl::Status ChaChaPrngResalt(absl::string_view key, int buffer_size,
                               int* salt_counter, int* position_in_buffer,
@@ -85,4 +86,5 @@ rlwe::StatusOr<Uint64> ChaChaPrngRand64(absl::string_view key,
   return rand64;
 }
 
-}  // namespace rlwe::internal
+}  // namespace internal
+}  // namespace rlwe

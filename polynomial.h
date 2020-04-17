@@ -80,7 +80,8 @@ class Polynomial {
                                  const NttParameters<ModularInt>* ntt_params,
                                  const ModularIntParams* modular_params) {
     // Check to ensure that the coefficient vector is of the correct length.
-    if (int len = poly_coeffs.size(); len <= 0 || (len & (len - 1)) != 0) {
+    int len = poly_coeffs.size();
+    if (len <= 0 || (len & (len - 1)) != 0) {
       // An error value.
       return Polynomial();
     }

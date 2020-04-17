@@ -22,8 +22,8 @@ template <typename T>
 rlwe::StatusOr<std::unique_ptr<const MontgomeryIntParams<T>>>
 MontgomeryIntParams<T>::Create(Int modulus) {
   // Check that the modulus is smaller than max(Int) / 4.
-  if (Int most_significant_bit = modulus >> (bitsize_int - 2);
-      most_significant_bit != 0) {
+  Int most_significant_bit = modulus >> (bitsize_int - 2);
+  if (most_significant_bit != 0) {
     return absl::InvalidArgumentError(absl::StrCat(
         "The modulus should be less than 2^", (bitsize_int - 2), "."));
   }
