@@ -96,7 +96,7 @@ class StatusOr {
 
   operator absl::Status() const { return status(); }
 
-  template <template <typename> typename OtherStatusOrType>
+  template <template <typename> class OtherStatusOrType>
   operator OtherStatusOrType<T>() {
     if (value_) {
       return OtherStatusOrType<T>(std::move(value_.value()));

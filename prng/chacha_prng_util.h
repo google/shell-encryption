@@ -28,7 +28,8 @@
 #include "integral_types.h"
 #include "statusor.h"
 
-namespace rlwe::internal {
+namespace rlwe {
+namespace internal {
 
 const int kChaChaKeyBytesSize = 32;
 const int kChaChaNonceSize = 12;
@@ -59,6 +60,7 @@ rlwe::StatusOr<Uint64> ChaChaPrngRand64(absl::string_view key,
                                         int* salt_counter,
                                         std::vector<Uint8>* buffer);
 
-}  // namespace rlwe::internal
+}  // namespace internal
+}  // namespace rlwe
 
 #endif  // RLWE_CHACHA_PRNG_UTIL_H_

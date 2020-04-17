@@ -103,7 +103,8 @@ static void BitrevHelper(const std::vector<unsigned int>& bitrevs,
   using std::swap;
   for (int i = 0; i < item_to_reverse->size(); i++) {
     // Only swap in one direction - don't accidentally swap twice.
-    if (unsigned int r = bitrevs[i]; i < r) {
+    unsigned int r = bitrevs[i];
+    if (static_cast<unsigned int>(i) < r) {
       swap((*item_to_reverse)[i], (*item_to_reverse)[r]);
     }
   }

@@ -571,8 +571,8 @@ class SymmetricRlweKey {
       const typename ModularIntQ::Params* modulus_params_q,
       const NttParameters<ModularIntQ>* ntt_params_q) const {
     // Configuration failure.
-    if (Int t = (modulus_params_q->One() << log_t_) + modulus_params_q->One();
-        modulus_params_->modulus % t != modulus_params_q->modulus % t) {
+    Int t = (modulus_params_q->One() << log_t_) + modulus_params_q->One();
+    if (modulus_params_->modulus % t != modulus_params_q->modulus % t) {
       return absl::InvalidArgumentError("p % t != q % t");
     }
 
