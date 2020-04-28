@@ -168,7 +168,7 @@ struct NttParameters {
   ~NttParameters() = default;
 
   int number_coeffs;
-  std::optional<ModularInt> n_inv_ptr;
+  absl::optional<ModularInt> n_inv_ptr;
   std::vector<ModularInt> psis_bitrev;
   std::vector<ModularInt> psis_inv_bitrev;
   std::vector<unsigned int> bitrevs;
