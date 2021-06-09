@@ -38,7 +38,7 @@ namespace rlwe {
     }                                         \
   } while (0)
 static inline int Fls64(Uint64 n) {
-  DCHECK_NE(0, n);
+  DCHECK_NE(static_cast<Uint64>(0), n);
   int pos = 0;
   STEP(Uint64, n, pos, 0x20);
   Uint32 n32 = n;
@@ -49,10 +49,12 @@ static inline int Fls64(Uint64 n) {
 }
 #undef STEP
 
+#ifdef ABSL_HAVE_INTRINSIC_INT128
 // Like Fls64() above, but returns the 0-based position of the last set bit
 // (i.e., most significant bit) in the given uint128. The argument may not be 0.
-static inline int Fls128(absl::uint128 n) {
-  if (Uint64 hi = absl::Uint128High64(n)) {
+static inline int Fls128(unsigned __int128 n) {
+  Uint64 hi = absl::Uint128High64(n);
+  if (hi != 0) {
     return Fls64(hi) + 64;
   }
   return Fls64(absl::Uint128Low64(n));
@@ -61,12 +63,30 @@ static inline int Fls128(absl::uint128 n) {
 // Like Fls128() above, but returns the 0-based position of the last set bit
 // (i.e., most significant bit) in the given uint256. The argument may not be 0.
 static inline int Fls256(uint256 n) {
+  unsigned __int128 hi = Uint256High128Intrinsic(n);
+  if (hi != 0) {
+    return Fls128(hi) + 128;
+  }
+  return Fls128(Uint256Low128Intrinsic(n));
+}
+
+#else
+static inline int Fls128(absl::uint128 n) {
+  Uint64 hi = absl::Uint128High64(n);
+  if (hi != 0) {
+    return Fls64(hi) + 64;
+  }
+  return Fls64(absl::Uint128Low64(n));
+}
+
+static inline int Fls256(uint256 n) {
   absl::uint128 hi = Uint256High128(n);
   if (hi != 0) {
     return Fls128(hi) + 128;
   }
   return Fls128(Uint256Low128(n));
 }
+#endif
 
 // Long division/modulo for uint256 implemented using the shift-subtract
 // division algorithm adapted from:
@@ -74,8 +94,9 @@ static inline int Fls256(uint256 n) {
 void uint256::DivModImpl(uint256 dividend, uint256 divisor,
                          uint256* quotient_ret, uint256* remainder_ret) {
   if (divisor == static_cast<uint256>(0)) {
-    LOG(FATAL) << "Division or mod by zero: dividend.hi=" << dividend.hi_
-               << ", lo=" << dividend.lo_;
+    LOG(FATAL) << "Division or mod by zero: dividend.hi="
+               << absl::uint128(dividend.hi_)
+               << ", lo=" << absl::uint128(dividend.lo_);
   }
 
   if (divisor > dividend) {
@@ -166,30 +187,30 @@ std::ostream& operator<<(std::ostream& o, const uint256& b) {
   uint256::DivModImpl(high, div, &high, &mid_high);
   bool print = high.lo_ != 0;
   if (print) {
-    os << high.lo_;
+    os << absl::uint128(high.lo_);
     os << std::noshowbase << std::setfill('0') << std::setw(div_base_log);
   }
   print |= mid_high.lo_ != 0;
   if (print) {
-    os << mid_high.lo_;
+    os << absl::uint128(mid_high.lo_);
     os << std::noshowbase << std::setfill('0') << std::setw(div_base_log);
   }
   print |= mid_mid.lo_ != 0;
   if (print) {
-    os << mid_mid.lo_;
+    os << absl::uint128(mid_mid.lo_);
     os << std::noshowbase << std::setfill('0') << std::setw(div_base_log);
   }
   print |= mid_low.lo_ != 0;
   if (print) {
-    os << mid_low.lo_;
+    os << absl::uint128(mid_low.lo_);
     os << std::noshowbase << std::setfill('0') << std::setw(div_base_log);
   }
-  os << low.lo_;
+  os << absl::uint128(low.lo_);
   std::string rep = os.str();
 
   // Add the requisite padding.
   std::streamsize width = o.width(0);
-  if (width > rep.size()) {
+  if (width > static_cast<int>(rep.size())) {
     if ((flags & std::ios::adjustfield) == std::ios::left) {
       rep.append(width - rep.size(), o.fill());
     } else {

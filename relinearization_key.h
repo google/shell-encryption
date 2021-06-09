@@ -74,8 +74,8 @@ class RelinearizationKey {
   // substition_power = k to return the ciphertext to be encrypted with (1,s).
   // See GaloisKey for an explicit wrapper around RelinearizationKey.
   static rlwe::StatusOr<RelinearizationKey> Create(
-      const SymmetricRlweKey<ModularInt>& key, absl::string_view prng_seed,
-      ssize_t num_parts, Uint64 log_decomposition_modulus,
+      const SymmetricRlweKey<ModularInt>& key, PrngType prng_type,
+      int num_parts, Uint64 log_decomposition_modulus,
       Uint64 substitution_power = 1);
 
   // Takes a SymmetricRlweCiphertext with at most num_parts components and
@@ -156,8 +156,8 @@ class RelinearizationKey {
         ntt_params_(ntt_params) {}
 
   RelinearizationKey(const SymmetricRlweKey<ModularInt>& key,
-                     absl::string_view prng_seed, ssize_t num_parts,
-                     Uint64 log_decomposition_modulus,
+                     absl::string_view prng_seed, PrngType prng_type,
+                     int num_parts, Uint64 log_decomposition_modulus,
                      Uint64 substitution_power,
                      ModularInt decomposition_modulus,
                      std::vector<RelinearizationKeyPart> relinearization_key);
@@ -190,6 +190,9 @@ class RelinearizationKey {
 
   // Prng seed
   std::string prng_seed_;
+
+  // Prng type
+  PrngType prng_type_;
 };
 
 }  // namespace rlwe

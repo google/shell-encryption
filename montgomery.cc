@@ -163,7 +163,7 @@ MontgomeryInt<T>::DeserializeVector(int num_coeffs,
     return absl::InvalidArgumentError(
         "Number of coefficients must be non-negative.");
   }
-  if (num_coeffs > kMaxNumCoeffs) {
+  if (num_coeffs > static_cast<int>(kMaxNumCoeffs)) {
     return absl::InvalidArgumentError(
         absl::StrCat("Number of coefficients, ", num_coeffs, ", cannot be ",
                      "larger than ", kMaxNumCoeffs, "."));
@@ -178,7 +178,7 @@ MontgomeryInt<T>::DeserializeVector(int num_coeffs,
       (TranscribeBits<Uint8, Int>(input, bit_size * num_coeffs, 8, bit_size)));
   // Check that the number of coefficients recovered is at least what is
   // expected.
-  if (coeffs_values.size() < num_coeffs) {
+  if (coeffs_values.size() < static_cast<size_t>(num_coeffs)) {
     return absl::InvalidArgumentError("Given serialization is invalid.");
   }
   // Create a vector of Montgomery Int from the values.
@@ -215,7 +215,7 @@ absl::Status MontgomeryInt<T>::BatchAddInPlace(
   if (in1->size() != in2.size()) {
     return absl::InvalidArgumentError("Input vectors are not of same size");
   }
-  int i = 0;
+  size_t i = 0;
   // The remaining elements, if any, are added in place sequentially.
   for (; i < in1->size(); i++) {
     (*in1)[i].AddInPlace(in2[i], params);
@@ -236,7 +236,7 @@ template <typename T>
 absl::Status MontgomeryInt<T>::BatchAddInPlace(std::vector<MontgomeryInt>* in1,
                                                const MontgomeryInt& in2,
                                                const Params* params) {
-  int i = 0;
+  size_t i = 0;
   std::for_each(in1->begin() + i, in1->end(),
                 [&in2 = in2, params](MontgomeryInt& coeff) {
                   coeff.AddInPlace(in2, params);
@@ -261,7 +261,7 @@ absl::Status MontgomeryInt<T>::BatchSubInPlace(
   if (in1->size() != in2.size()) {
     return absl::InvalidArgumentError("Input vectors are not of same size");
   }
-  int i = 0;
+  size_t i = 0;
   for (; i < in1->size(); i++) {
     (*in1)[i].SubInPlace(in2[i], params);
   }
@@ -281,7 +281,7 @@ template <typename T>
 absl::Status MontgomeryInt<T>::BatchSubInPlace(std::vector<MontgomeryInt>* in1,
                                                const MontgomeryInt& in2,
                                                const Params* params) {
-  int i = 0;
+  size_t i = 0;
   std::for_each(in1->begin() + i, in1->end(),
                 [&in2 = in2, params](MontgomeryInt& coeff) {
                   coeff.SubInPlace(in2, params);
@@ -310,7 +310,7 @@ absl::Status MontgomeryInt<T>::BatchMulConstantInPlace(
       constant.size() != constant_barrett.size()) {
     return absl::InvalidArgumentError("Input vectors are not of same size");
   }
-  int i = 0;
+  size_t i = 0;
   for (; i < in1->size(); i++) {
     (*in1)[i].MulConstantInPlace(constant[i], constant_barrett[i], params);
   }
@@ -333,7 +333,7 @@ template <typename T>
 absl::Status MontgomeryInt<T>::BatchMulConstantInPlace(
     std::vector<MontgomeryInt>* in1, const Int& constant,
     const Int& constant_barrett, const Params* params) {
-  int i = 0;
+  size_t i = 0;
   for (; i < in1->size(); i++) {
     (*in1)[i].MulConstantInPlace(constant, constant_barrett, params);
   }
@@ -357,7 +357,7 @@ absl::Status MontgomeryInt<T>::BatchMulInPlace(
   if (in1->size() != in2.size()) {
     return absl::InvalidArgumentError("Input vectors are not of same size");
   }
-  int i = 0;
+  size_t i = 0;
   for (; i < in1->size(); i++) {
     (*in1)[i].MulInPlace(in2[i], params);
   }
@@ -377,11 +377,67 @@ template <typename T>
 absl::Status MontgomeryInt<T>::BatchMulInPlace(std::vector<MontgomeryInt>* in1,
                                                const MontgomeryInt& in2,
                                                const Params* params) {
-  int i = 0;
+  size_t i = 0;
   std::for_each(in1->begin() + i, in1->end(),
                 [&in2 = in2, params](MontgomeryInt& coeff) {
                   coeff.MulInPlace(in2, params);
                 });
+  return absl::OkStatus();
+}
+
+template <typename T>
+rlwe::StatusOr<std::vector<MontgomeryInt<T>>>
+MontgomeryInt<T>::BatchFusedMulAdd(const std::vector<MontgomeryInt>& in1,
+                                   const std::vector<MontgomeryInt>& in2,
+                                   const std::vector<MontgomeryInt>& in3,
+                                   const Params* params) {
+  std::vector<MontgomeryInt> out = in1;
+  RLWE_RETURN_IF_ERROR(BatchFusedMulAddInPlace(&out, in2, in3, params));
+  return out;
+}
+
+template <typename T>
+absl::Status MontgomeryInt<T>::BatchFusedMulAddInPlace(
+    std::vector<MontgomeryInt>* in1, const std::vector<MontgomeryInt>& in2,
+    const std::vector<MontgomeryInt>& in3, const Params* params) {
+  // If the input vectors' sizes don't match, return an error.
+  if (in1->size() != in2.size() || in1->size() != in3.size()) {
+    return absl::InvalidArgumentError("Input vectors are not of same size");
+  }
+  size_t i = 0;
+  for (; i < in1->size(); i++) {
+    (*in1)[i].FusedMulAddInPlace(in2[i], in3[i], params);
+  }
+  return absl::OkStatus();
+}
+
+template <typename T>
+rlwe::StatusOr<std::vector<MontgomeryInt<T>>>
+MontgomeryInt<T>::BatchFusedMulConstantAdd(
+    const std::vector<MontgomeryInt>& in1,
+    const std::vector<MontgomeryInt>& in2, const std::vector<Int>& constant,
+    const std::vector<Int>& constant_barrett, const Params* params) {
+  std::vector<MontgomeryInt> out = in1;
+  RLWE_RETURN_IF_ERROR(BatchFusedMulConstantAddInPlace(
+      &out, in2, constant, constant_barrett, params));
+  return out;
+}
+
+template <typename T>
+absl::Status MontgomeryInt<T>::BatchFusedMulConstantAddInPlace(
+    std::vector<MontgomeryInt>* in1, const std::vector<MontgomeryInt>& in2,
+    const std::vector<Int>& constant, const std::vector<Int>& constant_barrett,
+    const Params* params) {
+  // If the input vectors' sizes don't match, return an error.
+  if (in1->size() != in2.size() || in1->size() != constant.size() ||
+      in1->size() != constant_barrett.size()) {
+    return absl::InvalidArgumentError("Input vectors are not of same size");
+  }
+  size_t i = 0;
+  for (; i < in1->size(); i++) {
+    (*in1)[i].FusedMulConstantAddInPlace(in2[i], constant[i],
+                                         constant_barrett[i], params);
+  }
   return absl::OkStatus();
 }
 
@@ -424,4 +480,8 @@ template class MontgomeryInt<Uint16>;
 template class MontgomeryInt<Uint32>;
 template class MontgomeryInt<Uint64>;
 template class MontgomeryInt<absl::uint128>;
+#ifdef ABSL_HAVE_INTRINSIC_INT128
+template struct MontgomeryIntParams<unsigned __int128>;
+template class MontgomeryInt<unsigned __int128>;
+#endif
 }  // namespace rlwe

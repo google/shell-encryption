@@ -29,7 +29,8 @@
 #include "statusor.h"
 #include "testing/coefficient_polynomial.pb.h"
 
-namespace rlwe::testing {
+namespace rlwe {
+namespace testing {
 
 // A polynomial with ModularInt coefficients that is automatically reduced
 // modulo <x^n + 1>, where n is the number of coefficients provided in the
@@ -153,7 +154,7 @@ class CoefficientPolynomial {
 
     for (int i = 0; i < Len(); i++) {
       for (int j = 0; j < Len(); j++) {
-        if ((i + j) >= coeffs_.size()) {
+        if ((i + j) >= static_cast<int>(coeffs_.size())) {
           // Since multiplciation is mod (x^N + 1), if the coefficient computed
           // has degree k (= i + j) larger than N, it contributes to the (k -
           // N)'th coefficient with a negative factor.
@@ -264,6 +265,7 @@ class CoefficientPolynomial {
   const ModularIntParams* modulus_params_;
 };
 
-}  // namespace rlwe::testing
+}  // namespace testing
+}  // namespace rlwe
 
 #endif  // RLWE_TESTING_COEFFICIENT_POLYNOMIAL_H_

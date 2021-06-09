@@ -65,6 +65,8 @@ cc_library(
         "//:polynomial",
         "//:statusor_fork",
         "//:symmetric_encryption",
+        "//prng:single_thread_chacha_prng",
+        "//prng:single_thread_hkdf_prng",
     ],
 )
 

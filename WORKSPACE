@@ -1,6 +1,31 @@
 load("@bazel_tools//tools/build_defs/repo:git.bzl", "git_repository")
 load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
 
+# Tink
+http_archive(
+     name = "tink_base",
+     urls = ["https://github.com/google/tink/archive/master.zip"],
+     strip_prefix = "tink-master/",
+)
+
+http_archive(
+     name = "tink_cc",
+     urls = ["https://github.com/google/tink/archive/master.zip"],
+     strip_prefix = "tink-master/cc",
+)
+
+load("@tink_base//:tink_base_deps.bzl", "tink_base_deps")
+tink_base_deps()
+
+load("@tink_base//:tink_base_deps_init.bzl", "tink_base_deps_init")
+tink_base_deps_init()
+
+load("@tink_cc//:tink_cc_deps.bzl", "tink_cc_deps")
+tink_cc_deps()
+
+load("@tink_cc//:tink_cc_deps_init.bzl", "tink_cc_deps_init")
+tink_cc_deps_init()
+
 # rules_cc defines rules for generating C++ code from Protocol Buffers.
 http_archive(
     name = "rules_cc",

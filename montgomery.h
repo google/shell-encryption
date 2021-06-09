@@ -63,6 +63,12 @@ template <>
 struct BigInt<absl::uint128> {
   typedef uint256 value_type;
 };
+#ifdef ABSL_HAVE_INTRINSIC_INT128
+template <>
+struct BigInt<unsigned __int128> {
+  typedef uint256 value_type;
+};
+#endif
 
 }  // namespace internal
 
@@ -77,6 +83,7 @@ struct MontgomeryIntParams {
   using Int = T;
   using BigInt = typename internal::BigInt<Int>::value_type;
   static const size_t bitsize_int = sizeof(Int) * 8;
+  static const size_t bitsize_bigint = sizeof(BigInt) * 8;
 
   // Factory function to create MontgomeryIntParams.
   static rlwe::StatusOr<std::unique_ptr<const MontgomeryIntParams>> Create(
@@ -113,17 +120,18 @@ struct MontgomeryIntParams {
                             // multiplication by inv_r.
 
   // The numerator used in the Barrett reduction.
-  const BigInt barrett_numerator;  // = 2^(sizeof(Int)*8) / modulus
+  const BigInt barrett_numerator;         // = 2^(sizeof(Int)*8) / modulus
+  const BigInt barrett_numerator_bigint;  // = 2^(sizeof(BigInt)*8-1) / modulus
 
-  inline const Int Zero() const { return 0; }
-  inline const Int One() const { return 1; }
-  inline const Int Two() const { return 2; }
+  const Int Zero() const { return 0; }
+  const Int One() const { return 1; }
+  const Int Two() const { return 2; }
 
   // Functions to perform Barrett reduction. For more details, see
   // https://en.wikipedia.org/wiki/Barrett_reduction.
   // This function should remains in the header file to avoid performance
   // regressions.
-  inline Int BarrettReduce(Int input) const {
+  Int BarrettReduce(Int input) const {
     Int out =
         static_cast<Int>((this->barrett_numerator * input) >> bitsize_int);
     out = input - (out * this->modulus);
@@ -132,11 +140,38 @@ struct MontgomeryIntParams {
     return (out >= this->modulus) ? out - this->modulus : out;
   }
 
+  Int BarrettReduceBigInt(BigInt input) const {
+    using BigBigInt = typename internal::BigInt<BigInt>::value_type;
+    Int out = static_cast<Int>(
+        (static_cast<BigBigInt>(this->barrett_numerator_bigint) * input) >>
+        (sizeof(BigInt) * 8 - 1));
+    out = static_cast<Int>(input) - (out * this->modulus);
+    // The steps above produce an integer that is in the range [0, 2N).
+    // We now reduce to the range [0, N).
+    return (out >= this->modulus) ? out - this->modulus : out;
+  }
+
+  // Function to multiply the input by the inverse of r, transforming back from
+  // Montgomery representation.
+  Int ExportInt(Int input) const {
+    Int out =
+        static_cast<Int>((static_cast<BigInt>(this->inv_r_barrett) * input) >>
+                         this->bitsize_int);
+    out = input * this->inv_r - out * this->modulus;
+    // The steps above produce an integer that is in the range [0, 2N).
+    // We now reduce to the range [0, N).
+    return (out >= this->modulus) ? out - this->modulus : out;
+  }
+
   // Computes the serialized byte length of an integer.
-  inline unsigned int SerializedSize() const { return (log_modulus + 7) / 8; }
+  unsigned int SerializedSize() const { return (log_modulus + 7) / 8; }
 
   // Check whether (1 << log_n) fits into the underlying Int type.
   static bool DoesLogNFit(Uint64 log_n) { return (log_n < bitsize_int - 1); }
+
+  // Transform an Int into a double. Note that as soon as value is more than
+  // 2^53, this is a potentially lossy conversion.
+  static double GetDouble(Int value) { return static_cast<double>(value); }
 
  private:
   MontgomeryIntParams(Int mod)
@@ -151,7 +186,10 @@ struct MontgomeryIntParams {
         inv_r(std::get<0>(MontgomeryIntParams::Inverses(modulus_bigint, r))),
         inv_r_barrett(static_cast<Int>(
             (static_cast<BigInt>(inv_r) << bitsize_int) / modulus)),
-        barrett_numerator(this->r / this->modulus_bigint) {}
+        barrett_numerator(this->r / this->modulus_bigint),
+        barrett_numerator_bigint(
+            (static_cast<BigInt>(1) << (sizeof(BigInt) * 8 - 1)) /
+            this->modulus_bigint) {}
 
   // Computes the Montgomery inverse coefficients for r and modulus using
   // the Extended Euclidean Algorithm.
@@ -161,6 +199,21 @@ struct MontgomeryIntParams {
   //     r * inv_r - modulus * inv_modulus = 1
   static std::tuple<Int, Int> Inverses(BigInt modulus_bigint, BigInt r);
 };
+
+// Specialization for uint128, because BigBigInt = uint512 is not available.
+template <>
+inline absl::uint128 MontgomeryIntParams<absl::uint128>::BarrettReduceBigInt(
+    uint256 input) const {
+  return static_cast<absl::uint128>(input % modulus);
+}
+#ifdef ABSL_HAVE_INTRINSIC_INT128
+template <>
+inline unsigned __int128
+MontgomeryIntParams<unsigned __int128>::BarrettReduceBigInt(
+    uint256 input) const {
+  return static_cast<unsigned __int128>(input % modulus);
+}
+#endif
 
 // Stores an integer in Montgomery representation. The goal of this
 // class is to provide a static type that differentiates between integers
@@ -185,6 +238,10 @@ class ABSL_MUST_USE_RESULT MontgomeryInt {
   // underlying integer type, into a Montgomery representation integer. Does not
   // take ownership of params. i.e., import "a".
   static rlwe::StatusOr<MontgomeryInt> ImportInt(Int n, const Params* params);
+
+  // Construction given `n` in Montgomery representation. If the input in not in
+  // Montgomery representation, one should use the ImportInt() function instead.
+  explicit MontgomeryInt(Int n) : n_(n) {}
 
   // Static functions to create a MontgomeryInt of 0 and 1.
   static MontgomeryInt ImportZero(const Params* params);
@@ -218,16 +275,10 @@ class ABSL_MUST_USE_RESULT MontgomeryInt {
 
   // Convert a Montgomery representation integer back to the underlying integer.
   // i.e., export "a".
-  inline Int ExportInt(const Params* params) const {
-    Int out =
-        static_cast<Int>((static_cast<BigInt>(params->inv_r_barrett) * n_) >>
-                         params->bitsize_int);
-    out = n_ * params->inv_r - out * params->modulus;
-    // The steps above produce an integer that is in the range [0, 2N).
-    // We now reduce to the range [0, N).
-    out -= (out >= params->modulus) ? params->modulus : 0;
-    return out;
-  }
+  Int ExportInt(const Params* params) const { return params->ExportInt(n_); }
+
+  // Get the Montgomery representation of the integer.
+  const Int GetMontgomeryRepresentation() const { return n_; }
 
   // Returns the least significant 64 bits of n.
   static Uint64 ExportUInt64(Int n) { return static_cast<Uint64>(n); }
@@ -276,7 +327,7 @@ class ABSL_MUST_USE_RESULT MontgomeryInt {
   // and perform modular reduction using Barrett reduction instead of
   // Montgomery multiplication.
 
-  // The funciton GetConstant() returns a tuple (constant, constant_barrett):
+  // The function GetConstant() returns a tuple (constant, constant_barrett):
   //       constant = ExportInt(params),
   // and
   //       constant_barrett = (constant << bitsize_int) / modulus
@@ -311,7 +362,7 @@ class ABSL_MUST_USE_RESULT MontgomeryInt {
   // This function should remains in the header file to avoid performance
   // regressions.
   MontgomeryInt& AddInPlace(const MontgomeryInt& that, const Params* params) {
-    // We can use Barrett reduction because n_ <= modulus < Max(Int)/2.
+    // We can use Barrett reduction because n_ <= modulus < Max(Int)/4.
     n_ = params->BarrettReduce(n_ + that.n_);
     return *this;
   }
@@ -337,8 +388,72 @@ class ABSL_MUST_USE_RESULT MontgomeryInt {
   // This function should remains in the header file to avoid performance
   // regressions.
   MontgomeryInt& SubInPlace(const MontgomeryInt& that, const Params* params) {
-    // We can use Barrett reduction because n_ <= modulus < Max(Int)/2.
+    // We can use Barrett reduction because n_ <= modulus < Max(Int)/4.
     n_ = params->BarrettReduce(n_ + (params->modulus - that.n_));
+    return *this;
+  }
+
+  MontgomeryInt& FusedMulAddInPlace(const MontgomeryInt& a,
+                                    const MontgomeryInt& b,
+                                    const Params* params) {
+    // Compute this += a * b by using r_mod_modulus which is 1 in Montgomery
+    // representation. Since a, b, and this are smaller than the modulus N, then
+    // t is smaller than 2N^2 < r * N, which is the condition for Montgomery
+    // reduction.
+    // en.wikipedia.org/wiki/Montgomery_modular_multiplication#The_REDC_algorithm
+    BigInt t = static_cast<BigInt>(params->r_mod_modulus) * n_ +
+               static_cast<BigInt>(a.n_) * b.n_;
+    // Perform a regular Montgomery reduction.
+    Int u = static_cast<Int>(t) * params->inv_modulus;
+    t += params->modulus_bigint * u;
+    Int t_msb = static_cast<Int>(t >> Params::bitsize_int);
+
+    // The steps above produce an integer that is in the range [0, 2N).
+    // We now reduce to the range [0, N).
+    n_ = (t_msb >= params->modulus) ? t_msb - params->modulus : t_msb;
+    return *this;
+  }
+
+  MontgomeryInt& FusedMulConstantAddInPlace(const MontgomeryInt& a,
+                                            const Int& constant,
+                                            const Int& constant_barrett,
+                                            const Params* params) {
+    // Compute this += a * constant, where this is multiplied by
+    // the Barrett numerator.
+    // Denote:
+    // - m = modulus
+    // - n = this
+    // - b = constant
+    // - k = bitsize_int
+    // - CB = constant_barrett = (b << k) / m = floor(b * 2^k/m),
+    // - BN = barrett_numerator = (1 << k) / m = floor(2^k/m),
+    //
+    // We recall that m <= k/4. The function below will compute
+    //           a * b + n - floor((CB * a + BN * n)/2^k) * m
+    // and we will prove that this is smaller than 2 * m, which enables to
+    // perform a unique conditional subtraction by m to reduce the final result
+    // in [0, m].
+    //
+    // We first express the floor as a difference,
+    //   a * b + n - floor((CB * a + BN * n)/2^k) * m
+    //   = ab + n - m * (CB * a + BN * n - (a * CB + n * BN mod 2^k))/2^k
+    // and we bound m * (a * CB + n * BN mod 2^k)/2^k by m, which yields:
+    //   <= ab + n - (CB*a + BN*n) * m/2^k + m.
+    //
+    // We know expand CB and BN with their definition,
+    //   = ab+n - m /2^k *(floor(b * 2^k/m) * a + floor(2^k/m) * n) + m
+    //   = ab+n - ma/2^k *(b2^k-(b2^k mod m))/m - mn/2^k*(2^k-(2^k mod m))/m + m
+    //   = ab+n - a /2^k *(b2^k-(b2^k mod m))   - n /2^k*(2^k-(2^k mod m)) + m
+    //   = ab+n - a*b + a*(b2^k mod m)/2^k - n + n(2^k mod m)/2^k + m
+    //   = a*(b2^k mod m)/2^k + n(2^k mod m)/2^k + m
+    //
+    // Finally, we note that a, n <= m, and we recall that m <= k/4. We get
+    //   <= 2m^2 / 2^k + m <= 2m^2/(4m) + m <= m/2+m < 2*m
+    Int out = static_cast<Int>((static_cast<BigInt>(constant_barrett) * a.n_ +
+                                params->barrett_numerator * n_) >>
+                               Params::bitsize_int);
+    n_ += a.n_ * constant - out * params->modulus;
+    n_ -= (n_ >= params->modulus) ? params->modulus : 0;
     return *this;
   }
 
@@ -391,6 +506,25 @@ class ABSL_MUST_USE_RESULT MontgomeryInt {
   static absl::Status BatchMulInPlace(std::vector<MontgomeryInt>* in1,
                                       const std::vector<MontgomeryInt>& in2,
                                       const Params* params);
+
+  // Batch fused multiply add of two vectors.
+  static rlwe::StatusOr<std::vector<MontgomeryInt>> BatchFusedMulAdd(
+      const std::vector<MontgomeryInt>& in1,
+      const std::vector<MontgomeryInt>& in2,
+      const std::vector<MontgomeryInt>& in3, const Params* params);
+  static absl::Status BatchFusedMulAddInPlace(
+      std::vector<MontgomeryInt>* in1, const std::vector<MontgomeryInt>& in2,
+      const std::vector<MontgomeryInt>& in3, const Params* params);
+
+  // Batch fused multiply add of two vectors, one being constant.
+  static rlwe::StatusOr<std::vector<MontgomeryInt>> BatchFusedMulConstantAdd(
+      const std::vector<MontgomeryInt>& in1,
+      const std::vector<MontgomeryInt>& in2, const std::vector<Int>& constant,
+      const std::vector<Int>& constant_barrett, const Params* params);
+  static absl::Status BatchFusedMulConstantAddInPlace(
+      std::vector<MontgomeryInt>* in1, const std::vector<MontgomeryInt>& in2,
+      const std::vector<Int>& constant,
+      const std::vector<Int>& constant_barrett, const Params* params);
 
   // Batch multiplication of two vectors, where the second vector is a constant.
   static rlwe::StatusOr<std::vector<MontgomeryInt>> BatchMulConstant(
@@ -461,8 +595,6 @@ class ABSL_MUST_USE_RESULT MontgomeryInt {
     }
     return rand;
   }
-
-  explicit MontgomeryInt(Int n) : n_(n) {}
 
   Int n_;
 };

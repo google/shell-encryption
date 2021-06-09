@@ -40,11 +40,14 @@ class ErrorParams {
       const int log_t, Uint64 variance,
       const typename ModularInt::Params* params,
       const rlwe::NttParameters<ModularInt>* ntt_params) {
-    if (log_t > params->log_modulus - 1) {
+    if (log_t > static_cast<int>(params->log_modulus) - 1) {
       return absl::InvalidArgumentError(
           absl::StrCat("The value log_t, ", log_t,
                        ", must be smaller than log_modulus - 1, ",
                        params->log_modulus - 1, "."));
+    } else if (log_t <= 0) {
+      return absl::InvalidArgumentError(
+          absl::StrCat("The value log_t, ", log_t, ", must be positive."));
     }
     if (variance > kMaxVariance) {
       return absl::InvalidArgumentError(absl::StrCat(

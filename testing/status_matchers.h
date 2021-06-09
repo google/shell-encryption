@@ -28,10 +28,10 @@ namespace internal {
 
 // This function and its overload allow the same matcher to be used for Status
 // and StatusOr tests.
-absl::Status GetStatus(const absl::Status& status) { return status; }
+inline absl::Status GetStatus(const absl::Status& status) { return status; }
 
 template <typename T>
-absl::Status GetStatus(const rlwe::StatusOr<T>& statusor) {
+inline absl::Status GetStatus(const rlwe::StatusOr<T>& statusor) {
   return statusor.status();
 }
 
@@ -42,8 +42,9 @@ class StatusIsImpl : public ::testing::MatcherInterface<StatusType> {
                const ::testing::Matcher<const std::string&>& message)
       : code_(code), message_(message) {}
 
-  bool MatchAndExplain(StatusType status,
-                       ::testing::MatchResultListener* listener) const {
+  bool MatchAndExplain(
+      StatusType status,
+      ::testing::MatchResultListener* listener) const override {
     ::testing::StringMatchResultListener str_listener;
     absl::Status real_status = GetStatus(status);
     if (!code_.MatchAndExplain(real_status.code(), &str_listener)) {
@@ -58,14 +59,14 @@ class StatusIsImpl : public ::testing::MatcherInterface<StatusType> {
     return true;
   }
 
-  void DescribeTo(std::ostream* os) const {
+  void DescribeTo(std::ostream* os) const override {
     *os << "has a status code that ";
     code_.DescribeTo(os);
     *os << " and a message that ";
     message_.DescribeTo(os);
   }
 
-  void DescribeNegationto(std::ostream* os) const {
+  void DescribeNegationTo(std::ostream* os) const override {
     *os << "has a status code that ";
     code_.DescribeNegationTo(os);
     *os << " and a message that ";
@@ -99,7 +100,7 @@ class StatusIsPoly {
 
 // This function allows us to avoid a template parameter when writing tests, so
 // that we can transparently test both Status and StatusOr returns.
-internal::StatusIsPoly StatusIs(
+inline internal::StatusIsPoly StatusIs(
     ::testing::Matcher<absl::StatusCode>&& code,
     ::testing::Matcher<const std::string&>&& message) {
   return internal::StatusIsPoly(

@@ -38,16 +38,17 @@ using Polynomial = rlwe::testing::CoefficientPolynomial<uint_m>;
 
 const int kDimension = 20;
 unsigned int seed = 0;
+std::mt19937 mt_rand(seed);
 
 class PolynomialTest : public ::testing::Test {
  protected:
   PolynomialTest()
-      : params14_(uint_m::Params::Create(rlwe::kNewhopeModulus).ValueOrDie()),
+      : params14_(uint_m::Params::Create(rlwe::kNewhopeModulus).value()),
         one_(uint_m::ImportOne(params14_.get())),
         zero_(uint_m::ImportZero(params14_.get())) {}
 
   rlwe::StatusOr<uint_m> SampleNonZero() {
-    return uint_m::ImportInt(1 + rand_r(&seed) % (params14_->modulus - 1),
+    return uint_m::ImportInt(1 + mt_rand() % (params14_->modulus - 1),
                              params14_.get());
   }
 
@@ -78,7 +79,7 @@ TEST_F(PolynomialTest, Equality) {
     ASSERT_OK_AND_ASSIGN(std::vector<uint_m> w, SampleRandomCoeffs(dimension));
 
     // Ensure v is really different than w.
-    int k = rand_r(&seed) % dimension;
+    int k = mt_rand() % dimension;
     v[k] = w[k].Add(one_, params14_.get());
 
     Polynomial p(v, params14_.get()), q(v, params14_.get()),
@@ -275,9 +276,8 @@ TEST_F(PolynomialTest, MonomialOutOfRange) {
 
 TEST_F(PolynomialTest, MultiplyByMonomial) {
   for (int dimension = 2; dimension < kDimension; dimension++) {
-    for (unsigned int monomial_degree :
-         {0, 1, dimension / 2, dimension - 1, dimension, dimension + 1,
-          2 * dimension - 1}) {
+    for (int monomial_degree : {0, 1, dimension / 2, dimension - 1, dimension,
+                                dimension + 1, 2 * dimension - 1}) {
       // Create a random polynomial and a random monomial.
       ASSERT_OK_AND_ASSIGN(std::vector<uint_m> v,
                            SampleRandomCoeffs(dimension));

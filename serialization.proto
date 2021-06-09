@@ -38,6 +38,13 @@ message SerializedSymmetricRlweCiphertext {
   optional double error = 3;
 }
 
+// Type of PRNG used to generate randomness.
+enum PrngType {
+  PRNG_TYPE_INVALID = 0;
+  PRNG_TYPE_HKDF = 1;
+  PRNG_TYPE_CHACHA = 2;
+}
+
 // RLWE RelinearizationKey
 message SerializedRelinearizationKey {
   // Polynomial composing the matrix
@@ -53,6 +60,9 @@ message SerializedRelinearizationKey {
 
   // Seed used to compress this key.
   optional bytes prng_seed = 4;  // Required
+
+  // Type of PRNG used to generate randomness.
+  optional PrngType prng_type = 6;  // Required
 
   // The power of s that corresponds to the key. The field is 1 if the key is
   // RelinearizationKey.

@@ -31,21 +31,14 @@ cc_library(
 )
 
 cc_library(
-    name = "integral_prng_types",
-    hdrs = ["integral_prng_types.h"],
-    deps = [
-        "//prng:chacha_prng",
-        "//prng:single_thread_chacha_prng",
-    ],
-)
-
-cc_library(
     name = "integral_prng_testing_types",
     testonly = 1,
     hdrs = ["integral_prng_testing_types.h"],
     deps = [
         ":chacha_prng",
+        ":hkdf_prng",
         ":single_thread_chacha_prng",
+        ":single_thread_hkdf_prng",
         "@com_github_google_googletest//:gtest",
     ],
 )
@@ -55,12 +48,91 @@ cc_library(
 cc_test(
     name = "prng_test",
     size = "small",
+    timeout = "moderate",
     srcs = [
         "prng_test.cc",
     ],
     deps = [
         ":integral_prng_testing_types",
-        ":integral_prng_types",
+        "//testing:matchers",
+        "//testing:status_testing",
+        "@com_github_google_googletest//:gtest_main",
+        "@com_google_absl//absl/strings",
+    ],
+)
+
+# PRNG using a HMAC-based key derivation function from Tink.
+
+cc_library(
+    name = "hkdf_prng",
+    srcs = [
+        "hkdf_prng.cc",
+    ],
+    hdrs = ["hkdf_prng.h"],
+    deps = [
+        ":hkdf_prng_util",
+        ":prng",
+        "//:statusor_fork",
+        "@com_google_absl//absl/memory",
+        "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/synchronization",
+    ],
+)
+
+cc_library(
+    name = "single_thread_hkdf_prng",
+    srcs = [
+        "single_thread_hkdf_prng.cc",
+    ],
+    hdrs = ["single_thread_hkdf_prng.h"],
+    deps = [
+        ":hkdf_prng_util",
+        ":prng",
+        "//:statusor_fork",
+        "@com_google_absl//absl/memory",
+        "@com_google_absl//absl/strings",
+    ],
+)
+
+cc_library(
+    name = "hkdf_prng_util",
+    srcs = [
+        "hkdf_prng_util.cc",
+    ],
+    hdrs = ["hkdf_prng_util.h"],
+    deps = [
+        "//:integral_types",
+        "//:statusor_fork",
+        "@com_google_absl//absl/memory",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/strings",
+        "@tink_cc//subtle",
+    ],
+)
+
+cc_test(
+    name = "hkdf_prng_test",
+    size = "small",
+    srcs = [
+        "hkdf_prng_test.cc",
+    ],
+    deps = [
+        ":hkdf_prng",
+        "//testing:matchers",
+        "//testing:status_testing",
+        "@com_github_google_googletest//:gtest_main",
+        "@com_google_absl//absl/strings",
+    ],
+)
+
+cc_test(
+    name = "single_thread_hkdf_prng_test",
+    size = "small",
+    srcs = [
+        "single_thread_hkdf_prng_test.cc",
+    ],
+    deps = [
+        ":single_thread_hkdf_prng",
         "//testing:matchers",
         "//testing:status_testing",
         "@com_github_google_googletest//:gtest_main",

@@ -47,6 +47,8 @@ using CoefficientPolynomial = rlwe::testing::CoefficientPolynomial<uint_m>;
 using Polynomial = rlwe::Polynomial<uint_m>;
 
 unsigned int seed = 0;
+std::mt19937 mt_rand(seed);
+
 const absl::string_view kPrngSeed =
     "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 
@@ -55,7 +57,7 @@ template <typename Prng>
 class PolynomialTest : public ::testing::Test {
  protected:
   PolynomialTest()
-      : params14_(uint_m::Params::Create(rlwe::kNewhopeModulus).ValueOrDie()),
+      : params14_(uint_m::Params::Create(rlwe::kNewhopeModulus).value()),
         zero_(uint_m::ImportZero(params14_.get())) {}
 
   void SetUp() override { srand(0); }
@@ -67,6 +69,7 @@ class PolynomialTest : public ::testing::Test {
 
     std::vector<uint_m> p_coeffs(n, zero_);
     std::vector<uint_m> q_coeffs(n, zero_);
+    std::vector<uint_m> r_coeffs(n, zero_);
 
     // Create some random polynomials. Ensure that they are different.
     for (int j = 0; j < n; j++) {
@@ -74,15 +77,18 @@ class PolynomialTest : public ::testing::Test {
                            uint_m::ImportRandom(prng.get(), params14_.get()));
       ASSERT_OK_AND_ASSIGN(q_coeffs[j],
                            uint_m::ImportRandom(prng.get(), params14_.get()));
+      ASSERT_OK_AND_ASSIGN(r_coeffs[j],
+                           uint_m::ImportRandom(prng.get(), params14_.get()));
     }
 
-    // Ensure the polynomials are different.
-    uint_m::Int rand_index = rand_r(&seed) % n;
+    // Ensure the polynomials p and q are different.
+    uint_m::Int rand_index = mt_rand() % n;
     auto one = uint_m::ImportOne(params14_.get());
     p_coeffs[rand_index] = q_coeffs[rand_index].Add(one, params14_.get());
 
     p_.reset(new CoefficientPolynomial(p_coeffs, params14_.get()));
     q_.reset(new CoefficientPolynomial(q_coeffs, params14_.get()));
+    r_.reset(new CoefficientPolynomial(r_coeffs, params14_.get()));
 
     // Acquire all of the NTT parameters.
     ASSERT_OK_AND_ASSIGN(auto ntt_params, rlwe::InitializeNttParameters<uint_m>(
@@ -95,10 +101,12 @@ class PolynomialTest : public ::testing::Test {
         Polynomial::ConvertToNtt(p_coeffs, ntt_params_.get(), params14_.get());
     ntt_q_ =
         Polynomial::ConvertToNtt(q_coeffs, ntt_params_.get(), params14_.get());
+    ntt_r_ =
+        Polynomial::ConvertToNtt(r_coeffs, ntt_params_.get(), params14_.get());
   }
 
   std::unique_ptr<Prng> MakePrng(absl::string_view seed) {
-    auto prng = Prng::Create(seed.substr(0, Prng::SeedLength())).ValueOrDie();
+    auto prng = Prng::Create(seed.substr(0, Prng::SeedLength())).value();
     return prng;
   }
 
@@ -106,8 +114,10 @@ class PolynomialTest : public ::testing::Test {
   std::unique_ptr<rlwe::NttParameters<uint_m>> ntt_params_;
   std::unique_ptr<CoefficientPolynomial> p_;
   std::unique_ptr<CoefficientPolynomial> q_;
+  std::unique_ptr<CoefficientPolynomial> r_;
   Polynomial ntt_p_;
   Polynomial ntt_q_;
+  Polynomial ntt_r_;
   uint_m zero_;
 };
 
@@ -221,6 +231,7 @@ TYPED_TEST(PolynomialTest, BinopOfDifferentLengths) {
 
       std::vector<uint_m> x(1 << i, this->zero_);
       std::vector<uint_m> y(1 << j, this->zero_);
+      std::vector<uint_m> z(1 << j, this->zero_);
 
       this->ntt_params_->bitrevs = rlwe::internal::BitrevArray(i);
       Polynomial ntt_x = Polynomial::ConvertToNtt(x, this->ntt_params_.get(),
@@ -228,31 +239,35 @@ TYPED_TEST(PolynomialTest, BinopOfDifferentLengths) {
       this->ntt_params_->bitrevs = rlwe::internal::BitrevArray(j);
       Polynomial ntt_y = Polynomial::ConvertToNtt(y, this->ntt_params_.get(),
                                                   this->params14_.get());
+      Polynomial ntt_z = Polynomial::ConvertToNtt(y, this->ntt_params_.get(),
+                                                  this->params14_.get());
 
       EXPECT_TRUE(ntt_x.IsValid());
       EXPECT_TRUE(ntt_y.IsValid());
+      EXPECT_TRUE(ntt_z.IsValid());
 
       // Lengths are different
       EXPECT_FALSE(ntt_x == ntt_y);
+      EXPECT_FALSE(ntt_x == ntt_z);
 
       EXPECT_THAT(ntt_x.Mul(ntt_y, this->params14_.get()),
                   StatusIs(::absl::StatusCode::kInvalidArgument,
-                           HasSubstr("do not have the same length")));
+                           HasSubstr("are not of same size")));
       EXPECT_THAT(ntt_y.Mul(ntt_x, this->params14_.get()),
                   StatusIs(::absl::StatusCode::kInvalidArgument,
-                           HasSubstr("do not have the same length")));
+                           HasSubstr("are not of same size")));
       EXPECT_THAT(ntt_x.Add(ntt_y, this->params14_.get()),
                   StatusIs(::absl::StatusCode::kInvalidArgument,
-                           HasSubstr("do not have the same length")));
+                           HasSubstr("are not of same size")));
       EXPECT_THAT(ntt_y.Add(ntt_x, this->params14_.get()),
                   StatusIs(::absl::StatusCode::kInvalidArgument,
-                           HasSubstr("do not have the same length")));
+                           HasSubstr("are not of same size")));
       EXPECT_THAT(ntt_x.Sub(ntt_y, this->params14_.get()),
                   StatusIs(::absl::StatusCode::kInvalidArgument,
-                           HasSubstr("do not have the same length")));
+                           HasSubstr("are not of same size")));
       EXPECT_THAT(ntt_y.Sub(ntt_x, this->params14_.get()),
                   StatusIs(::absl::StatusCode::kInvalidArgument,
-                           HasSubstr("do not have the same length")));
+                           HasSubstr("are not of same size")));
 
       // In-place operations return the original polynomial if invalid
       // To check, we keep a copy of the original and check that the output
@@ -261,22 +276,28 @@ TYPED_TEST(PolynomialTest, BinopOfDifferentLengths) {
       Polynomial orig_ntt_y = ntt_y;
       EXPECT_THAT(ntt_x.MulInPlace(ntt_y, this->params14_.get()),
                   StatusIs(::absl::StatusCode::kInvalidArgument,
-                           HasSubstr("do not have the same length")));
+                           HasSubstr("are not of same size")));
+      EXPECT_THAT(ntt_x.FusedMulAddInPlace(ntt_y, ntt_y, this->params14_.get()),
+                  StatusIs(::absl::StatusCode::kInvalidArgument,
+                           HasSubstr("are not of same size")));
+      EXPECT_THAT(ntt_y.FusedMulAddInPlace(ntt_x, ntt_y, this->params14_.get()),
+                  StatusIs(::absl::StatusCode::kInvalidArgument,
+                           HasSubstr("are not of same size")));
       EXPECT_THAT(ntt_y.MulInPlace(ntt_x, this->params14_.get()),
                   StatusIs(::absl::StatusCode::kInvalidArgument,
-                           HasSubstr("do not have the same length")));
+                           HasSubstr("are not of same size")));
       EXPECT_THAT(ntt_x.AddInPlace(ntt_y, this->params14_.get()),
                   StatusIs(::absl::StatusCode::kInvalidArgument,
-                           HasSubstr("do not have the same length")));
+                           HasSubstr("are not of same size")));
       EXPECT_THAT(ntt_y.AddInPlace(ntt_x, this->params14_.get()),
                   StatusIs(::absl::StatusCode::kInvalidArgument,
-                           HasSubstr("do not have the same length")));
+                           HasSubstr("are not of same size")));
       EXPECT_THAT(ntt_x.SubInPlace(ntt_y, this->params14_.get()),
                   StatusIs(::absl::StatusCode::kInvalidArgument,
-                           HasSubstr("do not have the same length")));
+                           HasSubstr("are not of same size")));
       EXPECT_THAT(ntt_y.SubInPlace(ntt_x, this->params14_.get()),
                   StatusIs(::absl::StatusCode::kInvalidArgument,
-                           HasSubstr("do not have the same length")));
+                           HasSubstr("are not of same size")));
     }
   }
 }
@@ -309,6 +330,30 @@ TYPED_TEST(PolynomialTest, Multiply) {
     EXPECT_EQ(res1, expected);
     EXPECT_EQ(res2, expected);
     EXPECT_EQ(res1, res2);
+  }
+}
+
+// Test fused multiply add.
+TYPED_TEST(PolynomialTest, FusedMulAddInPlace) {
+  for (int i = 2; i < 11; i++) {
+    this->SetParams(1 << i, i);
+
+    EXPECT_TRUE(this->ntt_p_.IsValid());
+    EXPECT_TRUE(this->ntt_q_.IsValid());
+    EXPECT_TRUE(this->ntt_r_.IsValid());
+
+    ASSERT_OK(this->ntt_p_.FusedMulAddInPlace(this->ntt_q_, this->ntt_r_,
+                                              this->params14_.get()));
+
+    CoefficientPolynomial res(
+        this->ntt_p_.InverseNtt(this->ntt_params_.get(), this->params14_.get()),
+        this->params14_.get());
+
+    ASSERT_OK_AND_ASSIGN(CoefficientPolynomial product,
+                         (*this->q_) * (*this->r_));
+    ASSERT_OK_AND_ASSIGN(CoefficientPolynomial expected, (*this->p_) + product);
+
+    EXPECT_EQ(res, expected);
   }
 }
 

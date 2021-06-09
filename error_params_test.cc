@@ -24,7 +24,6 @@
 #include "context.h"
 #include "montgomery.h"
 #include "ntt_parameters.h"
-#include "prng/integral_prng_types.h"
 #include "status_macros.h"
 #include "symmetric_encryption.h"
 #include "testing/parameters.h"
@@ -39,7 +38,7 @@ using ::rlwe::testing::StatusIs;
 using ::testing::HasSubstr;
 
 // Number of samples used to compute the actual variance.
-const rlwe::Uint64 kSamples = 50;
+const int kSamples = 50;
 
 template <typename ModularInt>
 class ErrorParamsTest : public testing::Test {
@@ -57,8 +56,9 @@ class ErrorParamsTest : public testing::Test {
   // Sample a random key.
   rlwe::StatusOr<Key> SampleKey(const rlwe::RlweContext<ModularInt>* context) {
     RLWE_ASSIGN_OR_RETURN(std::string prng_seed,
-                          rlwe::SingleThreadPrng::GenerateSeed());
-    RLWE_ASSIGN_OR_RETURN(auto prng, rlwe::SingleThreadPrng::Create(prng_seed));
+                          rlwe::SingleThreadHkdfPrng::GenerateSeed());
+    RLWE_ASSIGN_OR_RETURN(auto prng,
+                          rlwe::SingleThreadHkdfPrng::Create(prng_seed));
     return Key::Sample(context->GetLogN(), context->GetVariance(),
                        context->GetLogT(), context->GetModulusParams(),
                        context->GetNttParams(), prng.get());
@@ -74,8 +74,9 @@ class ErrorParamsTest : public testing::Test {
     auto plaintext_ntt = Polynomial::ConvertToNtt(m_p, context->GetNttParams(),
                                                   context->GetModulusParams());
     RLWE_ASSIGN_OR_RETURN(std::string prng_seed,
-                          rlwe::SingleThreadPrng::GenerateSeed());
-    RLWE_ASSIGN_OR_RETURN(auto prng, rlwe::SingleThreadPrng::Create(prng_seed));
+                          rlwe::SingleThreadHkdfPrng::GenerateSeed());
+    RLWE_ASSIGN_OR_RETURN(auto prng,
+                          rlwe::SingleThreadHkdfPrng::Create(prng_seed));
     return rlwe::Encrypt<ModularInt>(key, plaintext_ntt,
                                      context->GetErrorParams(), prng.get());
   }
@@ -85,7 +86,7 @@ class ErrorParamsTest : public testing::Test {
       const Key& key, const Ciphertext& ciphertext) {
     Polynomial error_and_message_ntt(key.Len(), key.ModulusParams());
     Polynomial key_powers = key.Key();
-    for (int i = 0; i < ciphertext.Len(); i++) {
+    for (unsigned int i = 0; i < ciphertext.Len(); i++) {
       // Extract component i.
       RLWE_ASSIGN_OR_RETURN(Polynomial ci, ciphertext.Component(i));
 
@@ -105,7 +106,7 @@ class ErrorParamsTest : public testing::Test {
 
     // Convert the integers mod q to integers.
     std::vector<Int> error_and_message_ints(error_and_message.size(), 0);
-    for (int i = 0; i < error_and_message.size(); i++) {
+    for (size_t i = 0; i < error_and_message.size(); i++) {
       error_and_message_ints[i] =
           error_and_message[i].ExportInt(key.ModulusParams());
       if (error_and_message_ints[i] > (key.ModulusParams()->modulus >> 1)) {
@@ -120,7 +121,7 @@ TYPED_TEST_SUITE(ErrorParamsTest, rlwe::testing::ModularIntTypes);
 
 TYPED_TEST(ErrorParamsTest, CreateError) {
   for (const auto& params :
-       rlwe::testing::ContextParameters<TypeParam>::value) {
+       rlwe::testing::ContextParameters<TypeParam>::Value()) {
     ASSERT_OK_AND_ASSIGN(auto context,
                          rlwe::RlweContext<TypeParam>::Create(params));
 
@@ -140,7 +141,7 @@ TYPED_TEST(ErrorParamsTest, CreateError) {
 
 TYPED_TEST(ErrorParamsTest, PlaintextError) {
   for (const auto& params :
-       rlwe::testing::ContextParameters<TypeParam>::value) {
+       rlwe::testing::ContextParameters<TypeParam>::Value()) {
     ASSERT_OK_AND_ASSIGN(auto context,
                          rlwe::RlweContext<TypeParam>::Create(params));
 
@@ -161,7 +162,7 @@ TYPED_TEST(ErrorParamsTest, PlaintextError) {
 
 TYPED_TEST(ErrorParamsTest, EncryptionError) {
   for (const auto& params :
-       rlwe::testing::ContextParameters<TypeParam>::value) {
+       rlwe::testing::ContextParameters<TypeParam>::Value()) {
     ASSERT_OK_AND_ASSIGN(auto context,
                          rlwe::RlweContext<TypeParam>::Create(params));
     ASSERT_OK_AND_ASSIGN(auto key, this->SampleKey(context.get()));
@@ -186,7 +187,7 @@ TYPED_TEST(ErrorParamsTest, EncryptionError) {
 
 TYPED_TEST(ErrorParamsTest, RelinearizationErrorScalesWithT) {
   for (const auto& params :
-       rlwe::testing::ContextParameters<TypeParam>::value) {
+       rlwe::testing::ContextParameters<TypeParam>::Value()) {
     ASSERT_OK_AND_ASSIGN(auto context,
                          rlwe::RlweContext<TypeParam>::Create(params));
     // Error scales by (T / logT) when all other constants are fixed.

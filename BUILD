@@ -42,6 +42,7 @@ cc_library(
         ":ntt_parameters",
         ":statusor_fork",
         "@com_google_absl//absl/memory",
+        "@com_google_absl//absl/status",
     ],
 )
 
@@ -265,6 +266,7 @@ cc_library(
 cc_test(
     name = "polynomial_test",
     size = "small",
+    timeout = "moderate",
     srcs = [
         "polynomial_test.cc",
     ],
@@ -310,7 +312,6 @@ cc_test(
         ":ntt_parameters",
         ":statusor_fork",
         ":symmetric_encryption",
-        "//prng:integral_prng_types",
         "//testing:parameters",
         "//testing:status_is_fork",
         "//testing:status_testing",
@@ -332,7 +333,7 @@ cc_library(
         ":serialization_cc_proto",
         ":statusor_fork",
         "//prng",
-        "//prng:integral_prng_types",
+        "@com_google_absl//absl/status",
     ],
 )
 
@@ -351,13 +352,13 @@ cc_test(
         ":serialization_cc_proto",
         ":statusor_fork",
         ":symmetric_encryption",
-        "//prng:integral_prng_types",
         "//testing:parameters",
         "//testing:status_is_fork",
         "//testing:status_testing",
         "//testing:testing_prng",
         "//testing:testing_utils",
         "@com_github_google_googletest//:gtest_main",
+        "@com_google_absl//absl/status",
     ],
 )
 
@@ -369,7 +370,6 @@ cc_library(
         ":statusor_fork",
         ":symmetric_encryption",
         "//prng",
-        "//prng:integral_prng_types",
     ],
 )
 
@@ -386,7 +386,6 @@ cc_test(
         ":polynomial",
         ":statusor_fork",
         ":symmetric_encryption_with_prng",
-        "//prng:integral_prng_types",
         "//testing:parameters",
         "//testing:status_is_fork",
         "//testing:status_testing",
@@ -405,11 +404,16 @@ cc_library(
         ":bits_util",
         ":montgomery",
         ":sample_error",
+        ":serialization_cc_proto",
         ":statusor_fork",
         ":symmetric_encryption",
         ":symmetric_encryption_with_prng",
-        "//prng:integral_prng_types",
+        "//prng",
+        "//prng:single_thread_chacha_prng",
+        "//prng:single_thread_hkdf_prng",
+        "@com_google_absl//absl/memory",
         "@com_google_absl//absl/numeric:int128",
+        "@com_google_absl//absl/status",
     ],
 )
 
@@ -423,13 +427,19 @@ cc_test(
         ":ntt_parameters",
         ":polynomial",
         ":relinearization_key",
+        ":serialization_cc_proto",
         ":statusor_fork",
         ":symmetric_encryption",
-        "//prng:integral_prng_types",
+        "//prng:chacha_prng",
+        "//prng:hkdf_prng",
+        "//prng:single_thread_chacha_prng",
+        "//prng:single_thread_hkdf_prng",
         "//testing:status_is_fork",
         "//testing:status_testing",
         "//testing:testing_prng",
+        "//testing:testing_utils",
         "@com_github_google_googletest//:gtest_main",
+        "@com_google_absl//absl/status",
     ],
 )
 
@@ -457,7 +467,6 @@ cc_test(
         ":polynomial",
         ":statusor_fork",
         ":symmetric_encryption",
-        "//prng:integral_prng_types",
         "//testing:status_is_fork",
         "//testing:status_testing",
         "//testing:testing_prng",
@@ -499,7 +508,6 @@ cc_library(
     hdrs = ["transcription.h"],
     deps = [
         ":statusor_fork",
-        "@com_google_absl//absl/status",
         "@com_google_absl//absl/strings",
     ],
 )
@@ -507,6 +515,7 @@ cc_library(
 cc_test(
     name = "transcription_test",
     size = "small",
+    timeout = "moderate",
     srcs = ["transcription_test.cc"],
     deps = [
         ":integral_types",
@@ -516,5 +525,41 @@ cc_test(
         "//testing:status_testing",
         "@com_github_google_googletest//:gtest_main",
         "@com_google_absl//absl/numeric:int128",
+    ],
+)
+
+# Oblivious expand utilities
+
+cc_library(
+    name = "oblivious_expand",
+    hdrs = ["oblivious_expand.h"],
+    deps = [
+        ":galois_key",
+        ":integral_types",
+        ":ntt_parameters",
+        ":polynomial",
+        ":statusor_fork",
+        ":symmetric_encryption",
+        "@com_google_absl//absl/memory",
+    ],
+)
+
+cc_test(
+    name = "oblivious_expand_test",
+    size = "small",
+    srcs = ["oblivious_expand_test.cc"],
+    deps = [
+        ":constants",
+        ":galois_key",
+        ":montgomery",
+        ":ntt_parameters",
+        ":oblivious_expand",
+        ":symmetric_encryption",
+        "//testing:status_is_fork",
+        "//testing:status_testing",
+        "//testing:testing_utils",
+        "@com_github_google_googletest//:gtest_main",
+        "@com_google_absl//absl/memory",
+        "@com_google_absl//absl/status",
     ],
 )

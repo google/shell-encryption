@@ -45,20 +45,6 @@ constexpr Uint64 kModulus44 = 17592169240577;
 constexpr Uint64 kLogDegreeBound44 = 10;
 constexpr Uint64 kDegreeBound44 = 1L << kLogDegreeBound44;
 
-// RLWE parameters for 128-element database in PIR.
-constexpr Uint64 kModulus1PIR128 = 17592173449217;  // 44-bit modulus
-constexpr Uint64 kModulus2PIR128 = 8380417;         // 23-bit modulus
-constexpr Uint64 kLogTPIR128 = 10;
-constexpr Uint64 kLogDegreeBoundPIR128 = 10;
-constexpr Uint64 kDegreeBoundPIR128 = 1L << kLogDegreeBoundPIR128;
-
-// RLWE parameters for 256-element database in PIR.
-constexpr Uint64 kModulus1PIR256 = 8796087789569;  // 43-bit modulus
-constexpr Uint64 kModulus2PIR256 = 2056193;        // 21-bit modulus
-constexpr Uint64 kLogTPIR256 = 9;
-constexpr Uint64 kLogDegreeBoundPIR256 = 10;
-constexpr Uint64 kDegreeBoundPIR256 = 1L << kLogDegreeBoundPIR256;
-
 // RLWE parameters for a 25-bit and a 29-bit moduli, both congruent to 4 modulo
 // 5 = (1 << 2) + 1. These moduli will be useful for testing of modulus
 // switching.

@@ -50,11 +50,11 @@ class GaloisKey {
   // ciphertext is encrypted with. The prng_seed is used to generate and encode
   // the bottom row of the matrix, which consists of random entries.
   static rlwe::StatusOr<GaloisKey> Create(
-      const SymmetricRlweKey<ModularInt>& key, absl::string_view prng_seed,
+      const SymmetricRlweKey<ModularInt>& key, PrngType prng_type,
       Uint64 substitution_power, Uint64 log_decomposition_modulus) {
     RLWE_ASSIGN_OR_RETURN(auto relinearization_key,
                           RelinearizationKey<ModularInt>::Create(
-                              key, prng_seed, /*num_parts=*/2,
+                              key, prng_type, /*num_parts=*/2,
                               log_decomposition_modulus, substitution_power));
     return GaloisKey(std::move(relinearization_key));
   }

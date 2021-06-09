@@ -15,22 +15,31 @@
 
 #include "relinearization_key.h"
 
+#include <random>
+
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
+#include "absl/status/status.h"
 #include "constants.h"
 #include "montgomery.h"
 #include "ntt_parameters.h"
 #include "polynomial.h"
-#include "prng/integral_prng_types.h"
+#include "prng/chacha_prng.h"
+#include "prng/hkdf_prng.h"
+#include "prng/single_thread_chacha_prng.h"
+#include "prng/single_thread_hkdf_prng.h"
+#include "serialization.pb.h"
 #include "status_macros.h"
 #include "symmetric_encryption.h"
 #include "testing/status_matchers.h"
 #include "testing/status_testing.h"
 #include "testing/testing_prng.h"
+#include "testing/testing_utils.h"
 
 namespace {
 
 unsigned int seed = 1;
+std::mt19937 mt_rand(seed);
 
 // Useful typedefs.
 using uint_m = rlwe::MontgomeryInt<absl::uint128>;
@@ -41,19 +50,19 @@ using RelinearizationKey = rlwe::RelinearizationKey<uint_m>;
 using ErrorParams = rlwe::ErrorParams<uint_m>;
 
 // Set constants.
-const ssize_t kLogPlaintextModulus = 1;
-const ssize_t kPlaintextModulus = (1 << kLogPlaintextModulus) + 1;
-const ssize_t kDefaultVariance = 4;
-const ssize_t kCoeffs = rlwe::kNewhopeDegreeBound;
-const ssize_t kLogCoeffs = rlwe::kNewhopeLogDegreeBound;
-const ssize_t kSmallLogDecompositionModulus = 2;
-const ssize_t kLargeLogDecompositionModulus = 20;
+const int kLogPlaintextModulus = 1;
+const int kPlaintextModulus = (1 << kLogPlaintextModulus) + 1;
+const int kDefaultVariance = 4;
+const int kCoeffs = rlwe::kNewhopeDegreeBound;
+const int kLogCoeffs = rlwe::kNewhopeLogDegreeBound;
+const int kSmallLogDecompositionModulus = 2;
+const int kLargeLogDecompositionModulus = 20;
 
 using ::rlwe::testing::StatusIs;
 using ::testing::HasSubstr;
 
 // Test fixture.
-class RelinearizationKeyTest : public ::testing::Test {
+class RelinearizationKeyTest : public ::testing::TestWithParam<rlwe::PrngType> {
  protected:
   void SetUp() override {
     ASSERT_OK_AND_ASSIGN(params14_,
@@ -78,6 +87,17 @@ class RelinearizationKeyTest : public ::testing::Test {
                              kLogPlaintextModulus, kDefaultVariance,
                              params80_.get(), ntt_params80_.get()));
     error_params80_ = absl::make_unique<const ErrorParams>(error_params80);
+
+    prng_type_ = GetParam();
+  }
+
+  rlwe::StatusOr<std::string> GenerateSeed() {
+    return rlwe::testing::GenerateSeed(prng_type_);
+  }
+
+  rlwe::StatusOr<std::unique_ptr<rlwe::SecurePrng>> CreatePrng(
+      absl::string_view seed) {
+    return rlwe::testing::CreatePrng(seed, prng_type_);
   }
 
   // Convert a vector of integers to a vector of montgomery integers.
@@ -93,9 +113,8 @@ class RelinearizationKeyTest : public ::testing::Test {
   // Sample a random key.
   rlwe::StatusOr<Key> SampleKey(rlwe::Uint64 variance = kDefaultVariance,
                                 rlwe::Uint64 log_t = kLogPlaintextModulus) {
-    RLWE_ASSIGN_OR_RETURN(std::string prng_seed,
-                          rlwe::SingleThreadPrng::GenerateSeed());
-    RLWE_ASSIGN_OR_RETURN(auto prng, rlwe::SingleThreadPrng::Create(prng_seed));
+    RLWE_ASSIGN_OR_RETURN(std::string prng_seed, GenerateSeed());
+    RLWE_ASSIGN_OR_RETURN(auto prng, CreatePrng(prng_seed));
     return Key::Sample(kLogCoeffs, variance, log_t, params14_.get(),
                        ntt_params_.get(), prng.get());
   }
@@ -105,7 +124,7 @@ class RelinearizationKeyTest : public ::testing::Test {
                                            rlwe::Uint64 coeffs = kCoeffs) {
     std::vector<uint_m::Int> plaintext(kCoeffs);
     for (unsigned int i = 0; i < kCoeffs; i++) {
-      plaintext[i] = rand_r(&seed) % t;
+      plaintext[i] = mt_rand() % t;
     }
     return plaintext;
   }
@@ -120,9 +139,8 @@ class RelinearizationKeyTest : public ::testing::Test {
                           ConvertToMontgomery(plaintext, params));
     auto plaintext_ntt =
         Polynomial::ConvertToNtt(m_plaintext, ntt_params, params);
-    RLWE_ASSIGN_OR_RETURN(std::string prng_seed,
-                          rlwe::SingleThreadPrng::GenerateSeed());
-    RLWE_ASSIGN_OR_RETURN(auto prng, rlwe::SingleThreadPrng::Create(prng_seed));
+    RLWE_ASSIGN_OR_RETURN(std::string prng_seed, GenerateSeed());
+    RLWE_ASSIGN_OR_RETURN(auto prng, CreatePrng(prng_seed));
     return rlwe::Encrypt<uint_m>(key, plaintext_ntt, error_params, prng.get());
   }
 
@@ -132,16 +150,16 @@ class RelinearizationKeyTest : public ::testing::Test {
   std::unique_ptr<const rlwe::NttParameters<uint_m>> ntt_params80_;
   std::unique_ptr<const ErrorParams> error_params_;
   std::unique_ptr<const ErrorParams> error_params80_;
+
+  rlwe::PrngType prng_type_;
 };
 
-TEST_F(RelinearizationKeyTest, RelinearizationKeyReducesSizeOfCiphertext) {
+TEST_P(RelinearizationKeyTest, RelinearizationKeyReducesSizeOfCiphertext) {
   ASSERT_OK_AND_ASSIGN(auto key, SampleKey());
-  ASSERT_OK_AND_ASSIGN(std::string prng_seed,
-                       rlwe::SingleThreadPrng::GenerateSeed());
 
   ASSERT_OK_AND_ASSIGN(
       auto relinearization_key,
-      rlwe::RelinearizationKey<uint_m>::Create(key, prng_seed, /*num_parts=*/3,
+      rlwe::RelinearizationKey<uint_m>::Create(key, prng_type_, /*num_parts=*/3,
                                                kSmallLogDecompositionModulus));
 
   // Create the initial plaintexts.
@@ -172,21 +190,17 @@ TEST_F(RelinearizationKeyTest, RelinearizationKeyReducesSizeOfCiphertext) {
   EXPECT_EQ(relinearized_product.Len(), 2);
 }
 
-TEST_F(RelinearizationKeyTest, RelinearizeKey3PartsDecrypts) {
-  ASSERT_OK_AND_ASSIGN(std::string key_prng_seed,
-                       rlwe::SingleThreadPrng::GenerateSeed());
-  ASSERT_OK_AND_ASSIGN(auto key_prng,
-                       rlwe::SingleThreadPrng::Create(key_prng_seed));
+TEST_P(RelinearizationKeyTest, RelinearizeKey3PartsDecrypts) {
+  ASSERT_OK_AND_ASSIGN(std::string key_prng_seed, GenerateSeed());
+  ASSERT_OK_AND_ASSIGN(auto key_prng, CreatePrng(key_prng_seed));
   ASSERT_OK_AND_ASSIGN(
       auto key,
       Key::Sample(kLogCoeffs, kDefaultVariance, kLogPlaintextModulus,
                   params80_.get(), ntt_params80_.get(), key_prng.get()));
-  ASSERT_OK_AND_ASSIGN(std::string prng_seed,
-                       rlwe::SingleThreadPrng::GenerateSeed());
 
   ASSERT_OK_AND_ASSIGN(
       auto relinearization_key,
-      rlwe::RelinearizationKey<uint_m>::Create(key, prng_seed, /*num_parts=*/3,
+      rlwe::RelinearizationKey<uint_m>::Create(key, prng_type_, /*num_parts=*/3,
                                                kSmallLogDecompositionModulus));
 
   // Create the initial plaintexts.
@@ -224,21 +238,17 @@ TEST_F(RelinearizationKeyTest, RelinearizeKey3PartsDecrypts) {
   EXPECT_EQ(decrypted, expected);
 }
 
-TEST_F(RelinearizationKeyTest, RelinearizeKey4PartsDecrypts) {
-  ASSERT_OK_AND_ASSIGN(std::string key_prng_seed,
-                       rlwe::SingleThreadPrng::GenerateSeed());
-  ASSERT_OK_AND_ASSIGN(auto key_prng,
-                       rlwe::SingleThreadPrng::Create(key_prng_seed));
+TEST_P(RelinearizationKeyTest, RelinearizeKey4PartsDecrypts) {
+  ASSERT_OK_AND_ASSIGN(std::string key_prng_seed, GenerateSeed());
+  ASSERT_OK_AND_ASSIGN(auto key_prng, CreatePrng(key_prng_seed));
   ASSERT_OK_AND_ASSIGN(
       auto key,
       Key::Sample(kLogCoeffs, kDefaultVariance, kLogPlaintextModulus,
                   params80_.get(), ntt_params80_.get(), key_prng.get()));
-  ASSERT_OK_AND_ASSIGN(std::string prng_seed,
-                       rlwe::SingleThreadPrng::GenerateSeed());
 
   ASSERT_OK_AND_ASSIGN(
       auto relinearization_key,
-      rlwe::RelinearizationKey<uint_m>::Create(key, prng_seed, /*num_parts=*/4,
+      rlwe::RelinearizationKey<uint_m>::Create(key, prng_type_, /*num_parts=*/4,
                                                kLargeLogDecompositionModulus));
 
   // Create the initial plaintexts.
@@ -288,21 +298,17 @@ TEST_F(RelinearizationKeyTest, RelinearizeKey4PartsDecrypts) {
   EXPECT_EQ(decrypted, expected);
 }
 
-TEST_F(RelinearizationKeyTest, RelinearizeKeyLargeModulusDecrypts) {
-  ASSERT_OK_AND_ASSIGN(std::string key_prng_seed,
-                       rlwe::SingleThreadPrng::GenerateSeed());
-  ASSERT_OK_AND_ASSIGN(auto key_prng,
-                       rlwe::SingleThreadPrng::Create(key_prng_seed));
+TEST_P(RelinearizationKeyTest, RelinearizeKeyLargeModulusDecrypts) {
+  ASSERT_OK_AND_ASSIGN(std::string key_prng_seed, GenerateSeed());
+  ASSERT_OK_AND_ASSIGN(auto key_prng, CreatePrng(key_prng_seed));
   ASSERT_OK_AND_ASSIGN(
       auto key,
       Key::Sample(kLogCoeffs, kDefaultVariance, kLogPlaintextModulus,
                   params80_.get(), ntt_params80_.get(), key_prng.get()));
-  ASSERT_OK_AND_ASSIGN(std::string prng_seed,
-                       rlwe::SingleThreadPrng::GenerateSeed());
 
   ASSERT_OK_AND_ASSIGN(
       auto relinearization_key,
-      rlwe::RelinearizationKey<uint_m>::Create(key, prng_seed, /*num_parts=*/3,
+      rlwe::RelinearizationKey<uint_m>::Create(key, prng_type_, /*num_parts=*/3,
                                                kLargeLogDecompositionModulus));
 
   // Create the initial plaintexts.
@@ -341,21 +347,17 @@ TEST_F(RelinearizationKeyTest, RelinearizeKeyLargeModulusDecrypts) {
   EXPECT_EQ(decrypted, expected);
 }
 
-TEST_F(RelinearizationKeyTest, RepeatedRelinearizationDecrypts) {
-  ASSERT_OK_AND_ASSIGN(std::string key_prng_seed,
-                       rlwe::SingleThreadPrng::GenerateSeed());
-  ASSERT_OK_AND_ASSIGN(auto key_prng,
-                       rlwe::SingleThreadPrng::Create(key_prng_seed));
+TEST_P(RelinearizationKeyTest, RepeatedRelinearizationDecrypts) {
+  ASSERT_OK_AND_ASSIGN(std::string key_prng_seed, GenerateSeed());
+  ASSERT_OK_AND_ASSIGN(auto key_prng, CreatePrng(key_prng_seed));
   ASSERT_OK_AND_ASSIGN(
       auto key,
       Key::Sample(kLogCoeffs, kDefaultVariance, kLogPlaintextModulus,
                   params80_.get(), ntt_params80_.get(), key_prng.get()));
-  ASSERT_OK_AND_ASSIGN(std::string prng_seed,
-                       rlwe::SingleThreadPrng::GenerateSeed());
 
   ASSERT_OK_AND_ASSIGN(
       auto relinearization_key,
-      rlwe::RelinearizationKey<uint_m>::Create(key, prng_seed, /*num_parts=*/3,
+      rlwe::RelinearizationKey<uint_m>::Create(key, prng_type_, /*num_parts=*/3,
                                                kLargeLogDecompositionModulus));
 
   // Create the initial plaintexts.
@@ -407,15 +409,13 @@ TEST_F(RelinearizationKeyTest, RepeatedRelinearizationDecrypts) {
   EXPECT_EQ(decrypted, expected);
 }
 
-TEST_F(RelinearizationKeyTest, CiphertextWithTooManyComponents) {
+TEST_P(RelinearizationKeyTest, CiphertextWithTooManyComponents) {
   ASSERT_OK_AND_ASSIGN(auto key, SampleKey());
-  ASSERT_OK_AND_ASSIGN(std::string prng_seed,
-                       rlwe::SingleThreadPrng::GenerateSeed());
 
   // RelinearizationKey has length 2.
   ASSERT_OK_AND_ASSIGN(
       auto relinearization_key,
-      rlwe::RelinearizationKey<uint_m>::Create(key, prng_seed, /*num_parts=*/2,
+      rlwe::RelinearizationKey<uint_m>::Create(key, prng_type_, /*num_parts=*/2,
                                                kSmallLogDecompositionModulus));
 
   // Create the initial plaintexts.
@@ -444,15 +444,13 @@ TEST_F(RelinearizationKeyTest, CiphertextWithTooManyComponents) {
                        HasSubstr("RelinearizationKey not large enough")));
 }
 
-TEST_F(RelinearizationKeyTest, LogDecompositionModulusOutOfBounds) {
+TEST_P(RelinearizationKeyTest, LogDecompositionModulusOutOfBounds) {
   ASSERT_OK_AND_ASSIGN(auto key, SampleKey());
-  ASSERT_OK_AND_ASSIGN(std::string prng_seed,
-                       rlwe::SingleThreadPrng::GenerateSeed());
 
   // RelinearizationKey has length 2.
   EXPECT_THAT(
       rlwe::RelinearizationKey<uint_m>::Create(
-          key, prng_seed, /*num_parts=*/2,
+          key, prng_type_, /*num_parts=*/2,
           /*log_decomposition_modulus=*/key.ModulusParams()->log_modulus + 1),
       StatusIs(absl::StatusCode::kInvalidArgument,
                HasSubstr(absl::StrCat(
@@ -462,40 +460,34 @@ TEST_F(RelinearizationKeyTest, LogDecompositionModulusOutOfBounds) {
 
   int log_decomposition_modulus = 0;
   EXPECT_THAT(rlwe::RelinearizationKey<uint_m>::Create(
-                  key, prng_seed, /*num_parts=*/3, log_decomposition_modulus),
+                  key, prng_type_, /*num_parts=*/3, log_decomposition_modulus),
               StatusIs(absl::StatusCode::kInvalidArgument,
                        HasSubstr(absl::StrCat("Log decomposition modulus, ",
                                               log_decomposition_modulus,
                                               ", must be positive."))));
 }
 
-TEST_F(RelinearizationKeyTest, NumPartsMustBePositive) {
+TEST_P(RelinearizationKeyTest, NumPartsMustBePositive) {
   ASSERT_OK_AND_ASSIGN(auto key, SampleKey());
-  ASSERT_OK_AND_ASSIGN(std::string prng_seed,
-                       rlwe::SingleThreadPrng::GenerateSeed());
 
   EXPECT_THAT(
-      rlwe::RelinearizationKey<uint_m>::Create(key, prng_seed, /*num_parts=*/-1,
-                                               kSmallLogDecompositionModulus),
+      rlwe::RelinearizationKey<uint_m>::Create(
+          key, prng_type_, /*num_parts=*/-1, kSmallLogDecompositionModulus),
       StatusIs(absl::StatusCode::kInvalidArgument,
                HasSubstr("Num parts: -1 must be positive.")));
 }
 
-TEST_F(RelinearizationKeyTest, InvalidDeserialize) {
-  ASSERT_OK_AND_ASSIGN(std::string key_prng_seed,
-                       rlwe::SingleThreadPrng::GenerateSeed());
-  ASSERT_OK_AND_ASSIGN(auto key_prng,
-                       rlwe::SingleThreadPrng::Create(key_prng_seed));
+TEST_P(RelinearizationKeyTest, InvalidDeserialize) {
+  ASSERT_OK_AND_ASSIGN(std::string key_prng_seed, GenerateSeed());
+  ASSERT_OK_AND_ASSIGN(auto key_prng, CreatePrng(key_prng_seed));
   ASSERT_OK_AND_ASSIGN(
       auto key,
       Key::Sample(kLogCoeffs, kDefaultVariance, kLogPlaintextModulus,
                   params80_.get(), ntt_params80_.get(), key_prng.get()));
-  ASSERT_OK_AND_ASSIGN(std::string prng_seed,
-                       rlwe::SingleThreadPrng::GenerateSeed());
 
   ASSERT_OK_AND_ASSIGN(
       auto relinearization_key,
-      rlwe::RelinearizationKey<uint_m>::Create(key, prng_seed, /*num_parts=*/3,
+      rlwe::RelinearizationKey<uint_m>::Create(key, prng_type_, /*num_parts=*/3,
                                                kLargeLogDecompositionModulus));
   // Serialize and deserialize.
   ASSERT_OK_AND_ASSIGN(rlwe::SerializedRelinearizationKey serialized,
@@ -530,21 +522,17 @@ TEST_F(RelinearizationKeyTest, InvalidDeserialize) {
                            "number of matrix entries."))));
 }
 
-TEST_F(RelinearizationKeyTest, SerializeKey) {
-  ASSERT_OK_AND_ASSIGN(std::string key_prng_seed,
-                       rlwe::SingleThreadPrng::GenerateSeed());
-  ASSERT_OK_AND_ASSIGN(auto key_prng,
-                       rlwe::SingleThreadPrng::Create(key_prng_seed));
+TEST_P(RelinearizationKeyTest, SerializeKey) {
+  ASSERT_OK_AND_ASSIGN(std::string key_prng_seed, GenerateSeed());
+  ASSERT_OK_AND_ASSIGN(auto key_prng, CreatePrng(key_prng_seed));
   ASSERT_OK_AND_ASSIGN(
       auto key,
       Key::Sample(kLogCoeffs, kDefaultVariance, kLogPlaintextModulus,
                   params80_.get(), ntt_params80_.get(), key_prng.get()));
-  ASSERT_OK_AND_ASSIGN(std::string prng_seed,
-                       rlwe::SingleThreadPrng::GenerateSeed());
 
   ASSERT_OK_AND_ASSIGN(
       auto relinearization_key,
-      rlwe::RelinearizationKey<uint_m>::Create(key, prng_seed, /*num_parts=*/3,
+      rlwe::RelinearizationKey<uint_m>::Create(key, prng_type_, /*num_parts=*/3,
                                                kLargeLogDecompositionModulus));
 
   // Serialize and deserialize.
@@ -589,14 +577,12 @@ TEST_F(RelinearizationKeyTest, SerializeKey) {
   EXPECT_EQ(decrypted, expected);
 }
 
-TEST_F(RelinearizationKeyTest, RelinearizationKeyIncreasesError) {
+TEST_P(RelinearizationKeyTest, RelinearizationKeyIncreasesError) {
   ASSERT_OK_AND_ASSIGN(auto key, SampleKey());
-  ASSERT_OK_AND_ASSIGN(std::string prng_seed,
-                       rlwe::SingleThreadPrng::GenerateSeed());
 
   ASSERT_OK_AND_ASSIGN(
       auto relinearization_key,
-      rlwe::RelinearizationKey<uint_m>::Create(key, prng_seed, /*num_parts=*/3,
+      rlwe::RelinearizationKey<uint_m>::Create(key, prng_type_, /*num_parts=*/3,
                                                kSmallLogDecompositionModulus));
 
   // Create the initial plaintexts.
@@ -626,5 +612,9 @@ TEST_F(RelinearizationKeyTest, RelinearizationKeyIncreasesError) {
   // Expect that the error grows after relinearization.
   EXPECT_GT(relinearized_product.Error(), product.Error());
 }
+
+INSTANTIATE_TEST_SUITE_P(ParameterizedTest, RelinearizationKeyTest,
+                         testing::Values(rlwe::PRNG_TYPE_CHACHA,
+                                         rlwe::PRNG_TYPE_HKDF));
 
 }  // namespace

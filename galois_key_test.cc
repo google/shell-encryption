@@ -15,13 +15,14 @@
 
 #include "galois_key.h"
 
+#include <random>
+
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 #include "constants.h"
 #include "montgomery.h"
 #include "ntt_parameters.h"
 #include "polynomial.h"
-#include "prng/integral_prng_types.h"
 #include "status_macros.h"
 #include "symmetric_encryption.h"
 #include "testing/protobuf_matchers.h"
@@ -35,6 +36,7 @@ namespace {
 using Uint64 = rlwe::Uint64;
 
 unsigned int seed = 0;
+std::mt19937 mt_rand(seed);
 
 // Set constants.
 const Uint64 kLogPlaintextModulus = 1;
@@ -53,7 +55,7 @@ using ::rlwe::testing::StatusIs;
 using ::testing::HasSubstr;
 
 // Test fixture.
-class GaloisKeyTest : public ::testing::Test {
+class GaloisKeyTest : public ::testing::TestWithParam<rlwe::PrngType> {
  protected:
   void SetUp() override {
     ASSERT_OK_AND_ASSIGN(params59_, uint_m::Params::Create(rlwe::kModulus59));
@@ -69,6 +71,8 @@ class GaloisKeyTest : public ::testing::Test {
                                           params59_.get(), ntt_params_.get()));
     error_params_ =
         absl::make_unique<const rlwe::ErrorParams<uint_m>>(error_params);
+
+    prng_type_ = GetParam();
   }
 
   // Sample a random key.
@@ -76,8 +80,9 @@ class GaloisKeyTest : public ::testing::Test {
       Uint64 variance = rlwe::testing::kDefaultVariance,
       Uint64 log_t = kLogPlaintextModulus) {
     RLWE_ASSIGN_OR_RETURN(std::string prng_seed,
-                          rlwe::SingleThreadPrng::GenerateSeed());
-    RLWE_ASSIGN_OR_RETURN(auto prng, rlwe::SingleThreadPrng::Create(prng_seed));
+                          rlwe::testing::GenerateSeed(prng_type_));
+    RLWE_ASSIGN_OR_RETURN(auto prng,
+                          rlwe::testing::CreatePrng(prng_seed, prng_type_));
     return Key::Sample(rlwe::testing::kLogCoeffs, variance, log_t,
                        params59_.get(), ntt_params_.get(), prng.get());
   }
@@ -98,7 +103,7 @@ class GaloisKeyTest : public ::testing::Test {
       Uint64 coeffs = rlwe::testing::kCoeffs) {
     std::vector<uint_m::Int> plaintext(coeffs);
     for (unsigned int i = 0; i < coeffs; i++) {
-      plaintext[i] = rand_r(&seed) % t;
+      plaintext[i] = mt_rand() % t;
     }
     return plaintext;
   }
@@ -111,8 +116,9 @@ class GaloisKeyTest : public ::testing::Test {
     auto plaintext_ntt =
         Polynomial::ConvertToNtt(mp, ntt_params_.get(), params59_.get());
     RLWE_ASSIGN_OR_RETURN(std::string prng_seed,
-                          rlwe::SingleThreadPrng::GenerateSeed());
-    RLWE_ASSIGN_OR_RETURN(auto prng, rlwe::SingleThreadPrng::Create(prng_seed));
+                          rlwe::testing::GenerateSeed(prng_type_));
+    RLWE_ASSIGN_OR_RETURN(auto prng,
+                          rlwe::testing::CreatePrng(prng_seed, prng_type_));
     return rlwe::Encrypt<uint_m>(key, plaintext_ntt, error_params_.get(),
                                  prng.get());
   }
@@ -120,16 +126,16 @@ class GaloisKeyTest : public ::testing::Test {
   std::unique_ptr<const uint_m::Params> params59_;
   std::unique_ptr<const rlwe::NttParameters<uint_m>> ntt_params_;
   std::unique_ptr<const rlwe::ErrorParams<uint_m>> error_params_;
+
+  rlwe::PrngType prng_type_;
 };
 
-TEST_F(GaloisKeyTest, GaloisKeyPowerOfSDoesNotMatchSubPower) {
+TEST_P(GaloisKeyTest, GaloisKeyPowerOfSDoesNotMatchSubPower) {
   int substitution_power = 3;
   ASSERT_OK_AND_ASSIGN(auto key, SampleKey());
-  ASSERT_OK_AND_ASSIGN(std::string prng_seed,
-                       rlwe::SingleThreadPrng::GenerateSeed());
 
   ASSERT_OK_AND_ASSIGN(auto galois_key, rlwe::GaloisKey<uint_m>::Create(
-                                            key, prng_seed, substitution_power,
+                                            key, prng_type_, substitution_power,
                                             kLargeLogDecompositionModulus));
   auto plaintext = SamplePlaintext(kPlaintextModulus);
 
@@ -146,14 +152,12 @@ TEST_F(GaloisKeyTest, GaloisKeyPowerOfSDoesNotMatchSubPower) {
                    substitution_power))));
 }
 
-TEST_F(GaloisKeyTest, GaloisKeyUpdatesPowerOfS) {
+TEST_P(GaloisKeyTest, GaloisKeyUpdatesPowerOfS) {
   int substitution_power = 3;
   ASSERT_OK_AND_ASSIGN(auto key, SampleKey());
-  ASSERT_OK_AND_ASSIGN(std::string prng_seed,
-                       rlwe::SingleThreadPrng::GenerateSeed());
 
   ASSERT_OK_AND_ASSIGN(auto galois_key, rlwe::GaloisKey<uint_m>::Create(
-                                            key, prng_seed, substitution_power,
+                                            key, prng_type_, substitution_power,
                                             kLargeLogDecompositionModulus));
   auto plaintext = SamplePlaintext(kPlaintextModulus);
 
@@ -170,14 +174,12 @@ TEST_F(GaloisKeyTest, GaloisKeyUpdatesPowerOfS) {
   EXPECT_EQ(transformed_ciphertext.PowerOfS(), 1);
 }
 
-TEST_F(GaloisKeyTest, KeySwitchedCiphertextDecrypts) {
+TEST_P(GaloisKeyTest, KeySwitchedCiphertextDecrypts) {
   int substitution_power = 3;
   ASSERT_OK_AND_ASSIGN(auto key, SampleKey());
-  ASSERT_OK_AND_ASSIGN(std::string prng_seed,
-                       rlwe::SingleThreadPrng::GenerateSeed());
 
   ASSERT_OK_AND_ASSIGN(auto galois_key, rlwe::GaloisKey<uint_m>::Create(
-                                            key, prng_seed, substitution_power,
+                                            key, prng_type_, substitution_power,
                                             kLogDecompositionModulus));
 
   // Create the initial plaintexts.
@@ -209,7 +211,7 @@ TEST_F(GaloisKeyTest, KeySwitchedCiphertextDecrypts) {
   EXPECT_EQ(decrypted, expected);
 }
 
-TEST_F(GaloisKeyTest, ComposingSubstitutions) {
+TEST_P(GaloisKeyTest, ComposingSubstitutions) {
   // Ensure that a ciphertext can be substituted by composing substitutions in
   // steps that have GaloisKeys.
   int substitution_power = 9;
@@ -218,10 +220,8 @@ TEST_F(GaloisKeyTest, ComposingSubstitutions) {
   int galois_power = 3;
 
   ASSERT_OK_AND_ASSIGN(auto key, SampleKey());
-  ASSERT_OK_AND_ASSIGN(std::string prng_seed,
-                       rlwe::SingleThreadPrng::GenerateSeed());
   ASSERT_OK_AND_ASSIGN(auto galois_key, rlwe::GaloisKey<uint_m>::Create(
-                                            key, prng_seed, galois_power,
+                                            key, prng_type_, galois_power,
                                             kLogDecompositionModulus));
   auto plaintext = SamplePlaintext(kPlaintextModulus);
 
@@ -256,15 +256,13 @@ TEST_F(GaloisKeyTest, ComposingSubstitutions) {
   EXPECT_EQ(decrypted, expected);
 }
 
-TEST_F(GaloisKeyTest, LargeDecompositionModulus) {
+TEST_P(GaloisKeyTest, LargeDecompositionModulus) {
   int substitution_power = 3;
 
   ASSERT_OK_AND_ASSIGN(auto key, SampleKey());
-  ASSERT_OK_AND_ASSIGN(std::string prng_seed,
-                       rlwe::SingleThreadPrng::GenerateSeed());
 
   ASSERT_OK_AND_ASSIGN(auto galois_key, rlwe::GaloisKey<uint_m>::Create(
-                                            key, prng_seed, substitution_power,
+                                            key, prng_type_, substitution_power,
                                             kLargeLogDecompositionModulus));
   auto plaintext = SamplePlaintext(kPlaintextModulus);
 
@@ -294,14 +292,12 @@ TEST_F(GaloisKeyTest, LargeDecompositionModulus) {
   EXPECT_EQ(decrypted, expected);
 }
 
-TEST_F(GaloisKeyTest, CiphertextWithTooManyComponents) {
+TEST_P(GaloisKeyTest, CiphertextWithTooManyComponents) {
   int substitution_power = 3;
   ASSERT_OK_AND_ASSIGN(auto key, SampleKey());
-  ASSERT_OK_AND_ASSIGN(std::string prng_seed,
-                       rlwe::SingleThreadPrng::GenerateSeed());
 
   ASSERT_OK_AND_ASSIGN(auto galois_key, rlwe::GaloisKey<uint_m>::Create(
-                                            key, prng_seed, substitution_power,
+                                            key, prng_type_, substitution_power,
                                             kLargeLogDecompositionModulus));
   auto plaintext = SamplePlaintext(kPlaintextModulus);
 
@@ -316,15 +312,13 @@ TEST_F(GaloisKeyTest, CiphertextWithTooManyComponents) {
                        HasSubstr("RelinearizationKey not large enough")));
 }
 
-TEST_F(GaloisKeyTest, DeserializedKeySwitches) {
+TEST_P(GaloisKeyTest, DeserializedKeySwitches) {
   int substitution_power = 3;
   auto plaintext = SamplePlaintext(kPlaintextModulus);
   ASSERT_OK_AND_ASSIGN(auto key, SampleKey());
-  ASSERT_OK_AND_ASSIGN(std::string prng_seed,
-                       rlwe::SingleThreadPrng::GenerateSeed());
 
   ASSERT_OK_AND_ASSIGN(auto galois_key, rlwe::GaloisKey<uint_m>::Create(
-                                            key, prng_seed, substitution_power,
+                                            key, prng_type_, substitution_power,
                                             kLargeLogDecompositionModulus));
 
   // Serialize and deserialize.
@@ -369,14 +363,12 @@ TEST_F(GaloisKeyTest, DeserializedKeySwitches) {
   EXPECT_EQ(deserialized_decrypted, decrypted);
 }
 
-TEST_F(GaloisKeyTest, DeserializationFailsWithIncorrectModulus) {
+TEST_P(GaloisKeyTest, DeserializationFailsWithIncorrectModulus) {
   int substitution_power = 3;
   ASSERT_OK_AND_ASSIGN(auto key, SampleKey());
-  ASSERT_OK_AND_ASSIGN(std::string prng_seed,
-                       rlwe::SingleThreadPrng::GenerateSeed());
 
   ASSERT_OK_AND_ASSIGN(auto galois_key, rlwe::GaloisKey<uint_m>::Create(
-                                            key, prng_seed, substitution_power,
+                                            key, prng_type_, substitution_power,
                                             kLargeLogDecompositionModulus));
 
   ASSERT_OK_AND_ASSIGN(auto params29, uint_m::Params::Create(rlwe::kModulus29));
@@ -391,17 +383,15 @@ TEST_F(GaloisKeyTest, DeserializationFailsWithIncorrectModulus) {
                    ", must be at most: ", params29->log_modulus, "."))));
 }
 
-TEST_F(GaloisKeyTest, SerializationsOfIdentialKeysEqual) {
+TEST_P(GaloisKeyTest, SerializationsOfIdenticalKeysEqual) {
   int substitution_power = 3;
   auto plaintext = SamplePlaintext(kPlaintextModulus);
   ASSERT_OK_AND_ASSIGN(auto key, SampleKey());
-  ASSERT_OK_AND_ASSIGN(std::string prng_seed,
-                       rlwe::SingleThreadPrng::GenerateSeed());
 
   ASSERT_OK_AND_ASSIGN(auto galois_key, rlwe::GaloisKey<uint_m>::Create(
-                                            key, prng_seed, substitution_power,
+                                            key, prng_type_, substitution_power,
                                             kLargeLogDecompositionModulus));
-  auto galois_key_copy = galois_key;
+  const auto& galois_key_copy = galois_key;
 
   // Serialize both matrices.
   ASSERT_OK_AND_ASSIGN(auto serialized, galois_key.Serialize());
@@ -410,5 +400,9 @@ TEST_F(GaloisKeyTest, SerializationsOfIdentialKeysEqual) {
   // Check that two serializations of the same matrix are equal.
   EXPECT_THAT(serialized_copy, EqualsProto(serialized));
 }
+
+INSTANTIATE_TEST_SUITE_P(ParameterizedTest, GaloisKeyTest,
+                         ::testing::Values(rlwe::PRNG_TYPE_CHACHA,
+                                           rlwe::PRNG_TYPE_HKDF));
 
 }  //  namespace

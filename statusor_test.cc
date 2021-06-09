@@ -18,8 +18,8 @@
 #include <sstream>
 #include <string>
 
-#include "absl/status/status.h"
 #include <gtest/gtest.h>
+#include "absl/status/status.h"
 
 namespace rlwe {
 namespace {
@@ -78,11 +78,6 @@ TEST(StatusOrTest, MoveCtors) {
   statusor = NoDefaultNoCopy(42);
   EXPECT_TRUE(statusor.ok());
   EXPECT_EQ(42, statusor.value().GetDummy());
-}
-
-TEST(StatusOrTest, DiesWithNotOkStatus) {
-  StatusOr<NoDefault> statusor(absl::CancelledError(""));
-  EXPECT_DEATH_IF_SUPPORTED(statusor.value(), "");
 }
 
 TEST(StatusOrTest, Pointers) {

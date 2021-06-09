@@ -46,7 +46,7 @@ TYPED_TEST(SampleErrorTest, CheckUpperBoundOnNoise) {
   auto prng = absl::make_unique<rlwe::testing::TestingPrng>(0);
 
   for (const auto& params :
-       rlwe::testing::ContextParameters<TypeParam>::value) {
+       rlwe::testing::ContextParameters<TypeParam>::Value()) {
     ASSERT_OK_AND_ASSIGN(auto context,
                          rlwe::RlweContext<TypeParam>::Create(params));
 
@@ -57,7 +57,7 @@ TYPED_TEST(SampleErrorTest, CheckUpperBoundOnNoise) {
                                  context->GetN(), variance, prng.get(),
                                  context->GetModulusParams()));
         // Check that each coefficient is in [-2*variance, 2*variance]
-        for (int j = 0; j < context->GetN(); j++) {
+        for (size_t j = 0; j < context->GetN(); j++) {
           Int reduced = error[j].ExportInt(context->GetModulusParams());
           if (reduced > (context->GetModulus() >> 1)) {
             EXPECT_LT(context->GetModulus() - reduced, 2 * variance + 1);
@@ -73,7 +73,7 @@ TYPED_TEST(SampleErrorTest, CheckUpperBoundOnNoise) {
 TYPED_TEST(SampleErrorTest, FailOnTooLargeVariance) {
   auto prng = absl::make_unique<rlwe::testing::TestingPrng>(0);
   for (const auto& params :
-       rlwe::testing::ContextParameters<TypeParam>::value) {
+       rlwe::testing::ContextParameters<TypeParam>::Value()) {
     ASSERT_OK_AND_ASSIGN(auto context,
                          rlwe::RlweContext<TypeParam>::Create(params));
 

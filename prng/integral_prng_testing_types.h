@@ -20,11 +20,15 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 #include "prng/chacha_prng.h"
+#include "prng/hkdf_prng.h"
 #include "prng/single_thread_chacha_prng.h"
+#include "prng/single_thread_hkdf_prng.h"
 
 namespace rlwe {
 
-typedef ::testing::Types<ChaChaPrng, SingleThreadChaChaPrng> TestingPrngTypes;
+typedef ::testing::Types<HkdfPrng, SingleThreadHkdfPrng, ChaChaPrng,
+                         SingleThreadChaChaPrng>
+    TestingPrngTypes;
 
 }  // namespace rlwe
 

@@ -15,10 +15,17 @@
 
 #include "relinearization_key.h"
 
+#include <memory>
+
+#include "absl/memory/memory.h"
 #include "absl/numeric/int128.h"
+#include "absl/status/status.h"
 #include "bits_util.h"
 #include "montgomery.h"
-#include "prng/integral_prng_types.h"
+#include "prng/prng.h"
+#include "prng/single_thread_chacha_prng.h"
+#include "prng/single_thread_hkdf_prng.h"
+#include "serialization.pb.h"
 #include "status_macros.h"
 #include "statusor.h"
 #include "symmetric_encryption_with_prng.h"
@@ -26,12 +33,11 @@
 namespace rlwe {
 namespace {
 // Method to compute the number of digits needed to represent integers mod
-// q in base T. Upcasts the modulus to absl::uint128 to handle all Uint*
-// types.
+// q in base T.
+template <typename ModularInt>
 inline int ComputeDimension(Uint64 log_decomposition_modulus,
-                            absl::uint128 modulus) {
-  Uint64 modulus_bits = static_cast<Uint64>(internal::BitLength(modulus));
-  return (modulus_bits + (log_decomposition_modulus - 1)) /
+                            const typename ModularInt::Params* modulus_params) {
+  return (modulus_params->log_modulus + (log_decomposition_modulus - 1)) /
          log_decomposition_modulus;
 }
 
@@ -87,17 +93,21 @@ rlwe::StatusOr<std::vector<std::vector<ModularInt>>> BitDecompose(
       coefficients.begin(), coefficients.end(), ciphertext_coeffs.begin(),
       [modulus_params](ModularInt x) { return x.ExportInt(modulus_params); });
 
+  // Compute the mask to extract the log_decomposition_modulus least significant
+  // bits
+  typename ModularInt::Int mask =
+      (static_cast<typename ModularInt::Int>(1) << log_decomposition_modulus) -
+      1;
+
   std::vector<std::vector<ModularInt>> result(dimension);
   for (int i = 0; i < dimension; i++) {
     result[i].reserve(ciphertext_coeffs.size());
-    for (int j = 0; j < ciphertext_coeffs.size(); ++j) {
+    for (size_t j = 0; j < ciphertext_coeffs.size(); ++j) {
       RLWE_ASSIGN_OR_RETURN(
           auto coefficient_part,
-          ModularInt::ImportInt(
-              (ciphertext_coeffs[j] % (1L << log_decomposition_modulus)),
-              modulus_params));
+          ModularInt::ImportInt((ciphertext_coeffs[j] & mask), modulus_params));
       result[i].push_back(std::move(coefficient_part));
-      ciphertext_coeffs[j] = ciphertext_coeffs[j] >> log_decomposition_modulus;
+      ciphertext_coeffs[j] >>= log_decomposition_modulus;
     }
   }
 
@@ -110,18 +120,17 @@ rlwe::StatusOr<std::vector<Polynomial<ModularInt>>> MatrixMultiply(
     const std::vector<std::vector<Polynomial<ModularInt>>>& matrix,
     const typename ModularInt::Params* modulus_params,
     const NttParameters<ModularInt>* ntt_params) {
-  Polynomial<ModularInt> temp(matrix[0][0].Len(), modulus_params);
-  Polynomial<ModularInt> ntt_part(matrix[0][0].Len(), modulus_params);
+  std::vector<Polynomial<ModularInt>> result(
+      2, Polynomial<ModularInt>(decomposed_coefficients[0].size(),
+                                modulus_params));
 
-  std::vector<Polynomial<ModularInt>> result(2, temp);
-
-  for (int i = 0; i < matrix[0].size(); i++) {
-    ntt_part = Polynomial<ModularInt>::ConvertToNtt(
+  for (size_t i = 0; i < matrix[0].size(); i++) {
+    Polynomial<ModularInt> ntt_part = Polynomial<ModularInt>::ConvertToNtt(
         std::move(decomposed_coefficients[i]), ntt_params, modulus_params);
-    RLWE_ASSIGN_OR_RETURN(temp, ntt_part.Mul(matrix[0][i], modulus_params));
-    RLWE_RETURN_IF_ERROR(result[0].AddInPlace(temp, modulus_params));
-    RLWE_RETURN_IF_ERROR(ntt_part.MulInPlace(matrix[1][i], modulus_params))
-    RLWE_RETURN_IF_ERROR(result[1].AddInPlace(ntt_part, modulus_params));
+    RLWE_RETURN_IF_ERROR(
+        result[0].FusedMulAddInPlace(ntt_part, matrix[0][i], modulus_params));
+    RLWE_RETURN_IF_ERROR(
+        result[1].FusedMulAddInPlace(ntt_part, matrix[1][i], modulus_params));
   }
 
   return result;
@@ -225,11 +234,11 @@ RelinearizationKey<ModularInt>::RelinearizationKeyPart::Deserialize(
 template <typename ModularInt>
 RelinearizationKey<ModularInt>::RelinearizationKey(
     const SymmetricRlweKey<ModularInt>& key, absl::string_view prng_seed,
-    ssize_t num_parts, Uint64 log_decomposition_modulus,
+    PrngType prng_type, int num_parts, Uint64 log_decomposition_modulus,
     Uint64 substitution_power, ModularInt decomposition_modulus,
     std::vector<RelinearizationKeyPart> relinearization_key)
-    : dimension_(ComputeDimension(log_decomposition_modulus,
-                                  key.ModulusParams()->modulus)),
+    : dimension_(ComputeDimension<ModularInt>(log_decomposition_modulus,
+                                              key.ModulusParams())),
       num_parts_(num_parts),
       log_decomposition_modulus_(log_decomposition_modulus),
       decomposition_modulus_(decomposition_modulus),
@@ -237,13 +246,13 @@ RelinearizationKey<ModularInt>::RelinearizationKey(
       modulus_params_(key.ModulusParams()),
       ntt_params_(key.NttParams()),
       relinearization_key_(std::move(relinearization_key)),
-      prng_seed_(prng_seed) {}
+      prng_seed_(prng_seed),
+      prng_type_(prng_type) {}
 
 template <typename ModularInt>
 rlwe::StatusOr<RelinearizationKey<ModularInt>>
 RelinearizationKey<ModularInt>::Create(const SymmetricRlweKey<ModularInt>& key,
-                                       absl::string_view prng_seed,
-                                       ssize_t num_parts,
+                                       PrngType prng_type, int num_parts,
                                        Uint64 log_decomposition_modulus,
                                        Uint64 substitution_power) {
   if (num_parts <= 0) {
@@ -267,14 +276,28 @@ RelinearizationKey<ModularInt>::Create(const SymmetricRlweKey<ModularInt>& key,
   RLWE_ASSIGN_OR_RETURN(auto key_base, key.Substitute(substitution_power));
   auto key_power = key_base.Key();
 
-  RLWE_ASSIGN_OR_RETURN(auto prng, SingleThreadPrng::Create(prng_seed));
-  RLWE_ASSIGN_OR_RETURN(auto prng_encryption_seed,
-                        SingleThreadPrng::GenerateSeed());
-  RLWE_ASSIGN_OR_RETURN(auto prng_encryption,
-                        SingleThreadPrng::Create(prng_encryption_seed));
+  std::unique_ptr<SecurePrng> prng, prng_encryption;
+  std::string prng_seed, prng_encryption_seed;
+  if (prng_type == PRNG_TYPE_HKDF) {
+    RLWE_ASSIGN_OR_RETURN(prng_seed, SingleThreadHkdfPrng::GenerateSeed());
+    RLWE_ASSIGN_OR_RETURN(prng, SingleThreadHkdfPrng::Create(prng_seed));
+    RLWE_ASSIGN_OR_RETURN(prng_encryption_seed,
+                          SingleThreadHkdfPrng::GenerateSeed());
+    RLWE_ASSIGN_OR_RETURN(prng_encryption,
+                          SingleThreadHkdfPrng::Create(prng_encryption_seed));
+  } else if (prng_type == PRNG_TYPE_CHACHA) {
+    RLWE_ASSIGN_OR_RETURN(prng_seed, SingleThreadChaChaPrng::GenerateSeed());
+    RLWE_ASSIGN_OR_RETURN(prng, SingleThreadChaChaPrng::Create(prng_seed));
+    RLWE_ASSIGN_OR_RETURN(prng_encryption_seed,
+                          SingleThreadChaChaPrng::GenerateSeed());
+    RLWE_ASSIGN_OR_RETURN(prng_encryption,
+                          SingleThreadChaChaPrng::Create(prng_encryption_seed));
+  } else {
+    return absl::InvalidArgumentError("PrngType not specified correctly.");
+  }
 
-  auto dimension =
-      ComputeDimension(log_decomposition_modulus, key.ModulusParams()->modulus);
+  auto dimension = ComputeDimension<ModularInt>(log_decomposition_modulus,
+                                                key.ModulusParams());
   std::vector<RelinearizationKeyPart> relinearization_key;
   relinearization_key.reserve(num_parts);
   // Create RealinearizationKeyPart for each of the secret key parts: s, ...,
@@ -294,8 +317,9 @@ RelinearizationKey<ModularInt>::Create(const SymmetricRlweKey<ModularInt>& key,
   }
 
   return RelinearizationKey<ModularInt>(
-      key, prng_seed, num_parts, log_decomposition_modulus, substitution_power,
-      decomposition_modulus, std::move(relinearization_key));
+      key, prng_seed, prng_type, num_parts, log_decomposition_modulus,
+      substitution_power, decomposition_modulus,
+      std::move(relinearization_key));
 }
 
 template <typename ModularInt>
@@ -304,23 +328,20 @@ RelinearizationKey<ModularInt>::ApplyTo(
     const SymmetricRlweCiphertext<ModularInt>& ciphertext) const {
   // Ensure that the length of the ciphertext is less than or equal to the
   // length of the relinearization key.
-  if (ciphertext.Len() > num_parts_) {
+  if (static_cast<int>(ciphertext.Len()) > num_parts_) {
     return absl::InvalidArgumentError(
         "RelinearizationKey not large enough for ciphertext.");
   }
 
-  // Initialize the result ciphertext of length 2.
-  RLWE_ASSIGN_OR_RETURN(auto comp, ciphertext.Component(0));
-  std::vector<Polynomial<ModularInt>> result(
-      2, Polynomial<ModularInt>(comp.Len(), modulus_params_));
+  // Initialize the result ciphertext of length 2 by applying the first
+  // relinearization key part to the first component of the ciphertext.
+  RLWE_ASSIGN_OR_RETURN(auto c1, ciphertext.Component(1));
+  RLWE_ASSIGN_OR_RETURN(auto result, relinearization_key_[0].ApplyPartTo(
+                                         c1, modulus_params_, ntt_params_));
 
-  // Apply each RelinearizationKeyPart to the part of the ciphertext it
-  // corresponds to. The first component of the ciphertext corresponds to the
-  // "1" part of the secret key, and is added without any
-  // RelinearizationKeyPart.
-  result[0] = std::move(comp);
-
-  for (int i = 0; i < relinearization_key_.size(); i++) {
+  // Apply each following RelinearizationKeyPart to the part of the ciphertext
+  // it corresponds to.
+  for (size_t i = 1; i < relinearization_key_.size(); i++) {
     // Add RelinearizationKeyPart_i c_i to the result vector.
     RLWE_ASSIGN_OR_RETURN(auto temp_comp, ciphertext.Component(i + 1));
     RLWE_ASSIGN_OR_RETURN(auto result_part,
@@ -329,6 +350,13 @@ RelinearizationKey<ModularInt>::ApplyTo(
     RLWE_RETURN_IF_ERROR(result[0].AddInPlace(result_part[0], modulus_params_));
     RLWE_RETURN_IF_ERROR(result[1].AddInPlace(result_part[1], modulus_params_));
   }
+
+  // Finally, the first component of the ciphertext corresponds to the
+  // "1" part of the secret key, and is added without any
+  // RelinearizationKeyPart.
+  RLWE_ASSIGN_OR_RETURN(auto c0, ciphertext.Component(0));
+  RLWE_RETURN_IF_ERROR(result[0].AddInPlace(c0, modulus_params_));
+
   return SymmetricRlweCiphertext<ModularInt>(
       std::move(result), 1,
       ciphertext.Error() +
@@ -343,6 +371,7 @@ RelinearizationKey<ModularInt>::Serialize() const {
   output.set_log_decomposition_modulus(log_decomposition_modulus_);
   output.set_num_parts(num_parts_);
   output.set_prng_seed(prng_seed_);
+  output.set_prng_type(prng_type_);
   output.set_power_of_s(substitution_power_);
   for (const RelinearizationKeyPart& matrix : relinearization_key_) {
     // Only serialize the first row of each matrix.
@@ -381,7 +410,7 @@ RelinearizationKey<ModularInt>::Deserialize(
         "Log decomposition modulus, ", serialized.log_decomposition_modulus(),
         ", must be positive."));
   } else if (serialized.log_decomposition_modulus() >
-             modulus_params->log_modulus) {
+             static_cast<int>(modulus_params->log_modulus)) {
     return absl::InvalidArgumentError(absl::StrCat(
         "Log decomposition modulus, ", serialized.log_decomposition_modulus(),
         ", must be at most: ", modulus_params->log_modulus, "."));
@@ -391,8 +420,9 @@ RelinearizationKey<ModularInt>::Deserialize(
       serialized.c_size() / (serialized.num_parts() - 1);
 
   int dimension = polynomials_per_matrix;
-  if (dimension != ComputeDimension(serialized.log_decomposition_modulus(),
-                                    modulus_params->modulus)) {
+  if (dimension !=
+      ComputeDimension<ModularInt>(serialized.log_decomposition_modulus(),
+                                   modulus_params)) {
     return absl::InvalidArgumentError(
         absl::StrCat("Number of NTT Polynomials does not match expected ",
                      "number of matrix entries."));
@@ -407,10 +437,20 @@ RelinearizationKey<ModularInt>::Deserialize(
   output.dimension_ = dimension;
   output.num_parts_ = serialized.num_parts();
   output.prng_seed_ = serialized.prng_seed();
+  output.prng_type_ = serialized.prng_type();
   output.substitution_power_ = serialized.power_of_s();
 
-  // Create prng based on seed.
-  RLWE_ASSIGN_OR_RETURN(auto prng, SingleThreadPrng::Create(output.prng_seed_));
+  // Create prng based on seed and type.
+  std::unique_ptr<SecurePrng> prng;
+  if (output.prng_type_ == PRNG_TYPE_HKDF) {
+    RLWE_ASSIGN_OR_RETURN(prng,
+                          SingleThreadHkdfPrng::Create(output.prng_seed_));
+  } else if (output.prng_type_ == PRNG_TYPE_CHACHA) {
+    RLWE_ASSIGN_OR_RETURN(prng,
+                          SingleThreadChaChaPrng::Create(output.prng_seed_));
+  } else {
+    return absl::InvalidArgumentError("Invalid PRNG type is specified.");
+  }
 
   // Takes each polynomials_per_matrix chunk of serialized.c()'s and places them
   // into a KeyPart.
@@ -436,5 +476,7 @@ template class RelinearizationKey<MontgomeryInt<Uint16>>;
 template class RelinearizationKey<MontgomeryInt<Uint32>>;
 template class RelinearizationKey<MontgomeryInt<Uint64>>;
 template class RelinearizationKey<MontgomeryInt<absl::uint128>>;
-
+#ifdef ABSL_HAVE_INTRINSIC_INT128
+template class RelinearizationKey<MontgomeryInt<unsigned __int128>>;
+#endif
 }  //  namespace rlwe

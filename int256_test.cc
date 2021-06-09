@@ -368,6 +368,22 @@ TEST(Int256, AliasTests) {
   EXPECT_EQ(x4, x3);
 }
 
+TEST(Int256, DivideByZeroCheckFails) {
+  uint256 a = 0;
+  uint256 b = 0;
+  EXPECT_DEATH_IF_SUPPORTED(a / b, "Division or mod by zero:");
+  a = 123;
+  EXPECT_DEATH_IF_SUPPORTED(a / b, "Division or mod by zero:");
+}
+
+TEST(Int256, ModByZeroCheckFails) {
+  uint256 a = 0;
+  uint256 b = 0;
+  EXPECT_DEATH_IF_SUPPORTED(a % b, "Division or mod by zero:");
+  a = 123;
+  EXPECT_DEATH_IF_SUPPORTED(a % b, "Division or mod by zero:");
+}
+
 TEST(Int256, DivideAndMod) {
   // a := q * b + r
   uint256 a, b, q, r;
@@ -547,5 +563,28 @@ TEST(Int256, OStream) {
 }
 
 TEST(Int256, SizeOfTest) { EXPECT_EQ(sizeof(uint256), 32); }
+
+TEST(Int256, Initialize) {
+  absl::uint128 lo = 4;
+  absl::uint128 hi = -3;
+  uint256 z;
+  z.Initialize(hi, lo);
+  EXPECT_EQ(Uint256High128(z), hi);
+  EXPECT_EQ(Uint256Low128(z), lo);
+}
+
+#ifdef ABSL_HAVE_INTRINSIC_INT128
+TEST(Int256, Intrinsic) {
+  unsigned __int128 lo = 4;
+  unsigned __int128 hi = -3;
+  uint256 z(hi, lo);
+  uint256 z_init;
+  z_init.Initialize(hi, lo);
+  EXPECT_EQ(Uint256High128Intrinsic(z), hi);
+  EXPECT_EQ(Uint256Low128Intrinsic(z), lo);
+  EXPECT_EQ(Uint256High128Intrinsic(z_init), hi);
+  EXPECT_EQ(Uint256Low128Intrinsic(z_init), lo);
+}
+#endif
 
 }  // namespace rlwe

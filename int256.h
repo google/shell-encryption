@@ -38,7 +38,12 @@ class uint256 {
   constexpr uint256(unsigned long bottom);
   constexpr uint256(unsigned long long bottom);
   constexpr uint256(absl::uint128 bottom);
-  constexpr uint256(const uint256_pod &val);
+  constexpr uint256(const uint256_pod& val);
+
+#ifdef ABSL_HAVE_INTRINSIC_INT128
+  constexpr uint256(unsigned __int128 top, unsigned __int128 bottom);
+  constexpr uint256(unsigned __int128 bottom);
+#endif
 
   // Conversion operators to other arithmetic types
   constexpr explicit operator bool() const;
@@ -65,17 +70,25 @@ class uint256 {
   explicit operator double() const;
   explicit operator long double() const;
 
+#ifdef ABSL_HAVE_INTRINSIC_INT128
+  constexpr explicit operator __int128() const;
+  constexpr explicit operator unsigned __int128() const;
+#endif
+
   // Trivial copy constructor, assignment operator and destructor.
 
   void Initialize(absl::uint128 top, absl::uint128 bottom);
+#ifdef ABSL_HAVE_INTRINSIC_INT128
+  void Initialize(unsigned __int128 top, unsigned __int128 bottom);
+#endif
 
   // Arithmetic operators.
   uint256& operator+=(const uint256& b);
   uint256& operator-=(const uint256& b);
   uint256& operator*=(const uint256& b);
   // Long division/modulo for uint256.
-  uint256& operator/=(const uint256& b);
-  uint256& operator%=(const uint256& b);
+  uint256& operator/=(const uint256& divisor);
+  uint256& operator%=(const uint256& divisor);
   uint256 operator++(int);
   uint256 operator--(int);
   uint256& operator<<=(int);
@@ -88,6 +101,10 @@ class uint256 {
 
   friend absl::uint128 Uint256Low128(const uint256& v);
   friend absl::uint128 Uint256High128(const uint256& v);
+#ifdef ABSL_HAVE_INTRINSIC_INT128
+  friend unsigned __int128 Uint256Low128Intrinsic(const uint256& v);
+  friend unsigned __int128 Uint256High128Intrinsic(const uint256& v);
+#endif
 
   // We add "std::" to avoid including all of port.h.
   friend std::ostream& operator<<(std::ostream& o, const uint256& b);
@@ -100,8 +117,13 @@ class uint256 {
   // having lo_ first, hi_ last.
   // See util/endian/endian.h and Load256/Store256 for storing a uint256.
   // Adding any new members will cause sizeof(uint256) tests to fail.
+#ifdef ABSL_HAVE_INTRINSIC_INT128
+  unsigned __int128 lo_;
+  unsigned __int128 hi_;
+#else
   absl::uint128 lo_;
   absl::uint128 hi_;
+#endif
 
   // Uint256Max()
   //
@@ -127,11 +149,22 @@ struct uint256_pod {
   // of static instances, which is the primary reason for this struct in the
   // first place.  This does not seem to defeat any optimizations wrt
   // operations involving this struct.
+#ifdef ABSL_HAVE_INTRINSIC_INT128
+  unsigned __int128 hi;
+  unsigned __int128 lo;
+#else
   absl::uint128 hi;
   absl::uint128 lo;
+#endif
 };
 
-constexpr uint256_pod kuint256max = {absl::Uint128Max(), absl::Uint128Max()};
+#ifdef ABSL_HAVE_INTRINSIC_INT128
+const uint256_pod kuint256max = {
+    static_cast<unsigned __int128>(absl::kuint128max),
+    static_cast<unsigned __int128>(absl::kuint128max)};
+#else
+const uint256_pod kuint256max = {absl::Uint128Max(), absl::Uint128Max()};
+#endif
 
 // allow uint256 to be logged
 extern std::ostream& operator<<(std::ostream& o, const uint256& b);
@@ -141,14 +174,29 @@ extern std::ostream& operator<<(std::ostream& o, const uint256& b);
 // to native 256-bit types when compilers support them.
 inline absl::uint128 Uint256Low128(const uint256& v) { return v.lo_; }
 inline absl::uint128 Uint256High128(const uint256& v) { return v.hi_; }
+#ifdef ABSL_HAVE_INTRINSIC_INT128
+inline unsigned __int128 Uint256Low128Intrinsic(const uint256& v) {
+  return v.lo_;
+}
+inline unsigned __int128 Uint256High128Intrinsic(const uint256& v) {
+  return v.hi_;
+}
+#endif
 
 // --------------------------------------------------------------------------
 //                      Implementation details follow
 // --------------------------------------------------------------------------
+#ifdef ABSL_HAVE_INTRINSIC_INT128
+inline bool operator==(const uint256& lhs, const uint256& rhs) {
+  return (Uint256Low128Intrinsic(lhs) == Uint256Low128Intrinsic(rhs) &&
+          Uint256High128Intrinsic(lhs) == Uint256High128Intrinsic(rhs));
+}
+#else
 inline bool operator==(const uint256& lhs, const uint256& rhs) {
   return (Uint256Low128(lhs) == Uint256Low128(rhs) &&
           Uint256High128(lhs) == Uint256High128(rhs));
 }
+#endif
 inline bool operator!=(const uint256& lhs, const uint256& rhs) {
   return !(lhs == rhs);
 }
@@ -161,21 +209,41 @@ inline constexpr uint256::uint256(const uint256_pod& v)
 inline constexpr uint256::uint256(absl::uint128 bottom) : lo_(bottom), hi_(0) {}
 #ifndef SWIG
 inline constexpr uint256::uint256(int bottom)
-      : lo_(bottom), hi_((bottom < 0) ? -1 : 0) {}
+    : lo_(bottom), hi_((bottom < 0) ? -1 : 0) {}
 inline constexpr uint256::uint256(Uint32 bottom) : lo_(bottom), hi_(0) {}
 #endif
 inline constexpr uint256::uint256(Uint8 bottom) : lo_(bottom), hi_(0) {}
 
-inline constexpr uint256::uint256(unsigned long bottom)
-    : lo_(bottom), hi_(0) {}
+inline constexpr uint256::uint256(unsigned long bottom) : lo_(bottom), hi_(0) {}
 
 inline constexpr uint256::uint256(unsigned long long bottom)
     : lo_(bottom), hi_(0) {}
 
+#ifdef ABSL_HAVE_INTRINSIC_INT128
+inline constexpr uint256::uint256(unsigned __int128 top,
+                                  unsigned __int128 bottom)
+    : lo_(bottom), hi_(top) {}
+inline constexpr uint256::uint256(unsigned __int128 bottom)
+    : lo_(bottom), hi_(0) {}
+#endif
+
 inline void uint256::Initialize(absl::uint128 top, absl::uint128 bottom) {
+#ifdef ABSL_HAVE_INTRINSIC_INT128
+  hi_ = static_cast<unsigned __int128>(top);
+  lo_ = static_cast<unsigned __int128>(bottom);
+#else
+  hi_ = top;
+  lo_ = bottom;
+#endif
+}
+
+#ifdef ABSL_HAVE_INTRINSIC_INT128
+inline void uint256::Initialize(unsigned __int128 top,
+                                unsigned __int128 bottom) {
   hi_ = top;
   lo_ = bottom;
 }
+#endif
 
 // Conversion operators to integer types.
 
@@ -228,10 +296,19 @@ constexpr uint256::operator unsigned long long() const {
 }
 
 
-constexpr uint256::operator absl::uint128() const { return lo_; }
+constexpr uint256::operator absl::uint128() const {
+  return static_cast<absl::uint128>(lo_);
+}
 constexpr uint256::operator absl::int128() const {
   return static_cast<absl::int128>(lo_);
 }
+
+#ifdef ABSL_HAVE_INTRINSIC_INT128
+constexpr uint256::operator unsigned __int128() const { return lo_; }
+constexpr uint256::operator __int128() const {
+  return static_cast<__int128>(lo_);
+}
+#endif
 
 // Conversion operators to floating point types.
 
@@ -250,12 +327,22 @@ inline uint256::operator long double() const {
 
 // Comparison operators.
 
+#ifdef ABSL_HAVE_INTRINSIC_INT128
+#define CMP256(op)                                                            \
+  inline bool operator op(const uint256& lhs, const uint256& rhs) {           \
+    return (Uint256High128Intrinsic(lhs) == Uint256High128Intrinsic(rhs))     \
+               ? (Uint256Low128Intrinsic(lhs) op Uint256Low128Intrinsic(rhs)) \
+               : (Uint256High128Intrinsic(lhs)                                \
+                      op Uint256High128Intrinsic(rhs));                       \
+  }
+#else
 #define CMP256(op)                                                  \
   inline bool operator op(const uint256& lhs, const uint256& rhs) { \
     return (Uint256High128(lhs) == Uint256High128(rhs))             \
                ? (Uint256Low128(lhs) op Uint256Low128(rhs))         \
                : (Uint256High128(lhs) op Uint256High128(rhs));      \
   }
+#endif
 
 CMP256(<)
 CMP256(>)
@@ -267,31 +354,57 @@ CMP256(<=)
 // Unary operators
 
 inline uint256 operator-(const uint256& val) {
+#ifdef ABSL_HAVE_INTRINSIC_INT128
+  const unsigned __int128 hi_flip = ~Uint256High128Intrinsic(val);
+  const unsigned __int128 lo_flip = ~Uint256Low128Intrinsic(val);
+  const unsigned __int128 lo_add = lo_flip + 1;
+#else
   const absl::uint128 hi_flip = ~Uint256High128(val);
   const absl::uint128 lo_flip = ~Uint256Low128(val);
   const absl::uint128 lo_add = lo_flip + 1;
+#endif
   if (lo_add < lo_flip) {
     return uint256(hi_flip + 1, lo_add);
   }
   return uint256(hi_flip, lo_add);
 }
 
+#ifdef ABSL_HAVE_INTRINSIC_INT128
+inline bool operator!(const uint256& val) {
+  return !Uint256High128Intrinsic(val) && !Uint256Low128Intrinsic(val);
+}
+#else
 inline bool operator!(const uint256& val) {
   return !Uint256High128(val) && !Uint256Low128(val);
 }
+#endif
 
 // Logical operators.
 
+#ifdef ABSL_HAVE_INTRINSIC_INT128
+inline uint256 operator~(const uint256& val) {
+  return uint256(~Uint256High128Intrinsic(val), ~Uint256Low128Intrinsic(val));
+}
+#else
 inline uint256 operator~(const uint256& val) {
   return uint256(~Uint256High128(val), ~Uint256Low128(val));
 }
+#endif
 
+#ifdef ABSL_HAVE_INTRINSIC_INT128
+#define LOGIC256(op)                                                   \
+  inline uint256 operator op(const uint256& lhs, const uint256& rhs) { \
+    return uint256(                                                    \
+        Uint256High128Intrinsic(lhs) op Uint256High128Intrinsic(rhs),  \
+        Uint256Low128Intrinsic(lhs) op Uint256Low128Intrinsic(rhs));   \
+  }
+#else
 #define LOGIC256(op)                                                   \
   inline uint256 operator op(const uint256& lhs, const uint256& rhs) { \
     return uint256(Uint256High128(lhs) op Uint256High128(rhs),         \
                    Uint256Low128(lhs) op Uint256Low128(rhs));          \
   }
-
+#endif
 LOGIC256(|)
 LOGIC256(&)
 LOGIC256(^)
@@ -381,17 +494,14 @@ inline uint256 operator%(const uint256& lhs, const uint256& rhs) {
 
 inline uint256& uint256::operator+=(const uint256& b) {
   hi_ += b.hi_;
-  absl::uint128 lolo = lo_ + b.lo_;
-  if (lolo < lo_)
-    ++hi_;
-  lo_ = lolo;
+  hi_ += (lo_ + b.lo_ < lo_);  // wrap around
+  lo_ += b.lo_;
   return *this;
 }
 
 inline uint256& uint256::operator-=(const uint256& b) {
   hi_ -= b.hi_;
-  if (b.lo_ > lo_)
-    --hi_;
+  hi_ -= (b.lo_ > lo_);  // wrap around
   lo_ -= b.lo_;
   return *this;
 }
@@ -412,11 +522,17 @@ inline uint256& uint256::operator*=(const uint256& b) {
   //
   // The first and last lines can be computed without worrying about the
   // carries, and then we add the two elements from the second line.
+#ifdef ABSL_HAVE_INTRINSIC_INT128
+  unsigned __int128 a64 = absl::Uint128High64(lo_);
+  unsigned __int128 a00 = static_cast<uint64_t>(lo_);
+  unsigned __int128 b64 = absl::Uint128High64(b.lo_);
+  unsigned __int128 b00 = static_cast<uint64_t>(b.lo_);
+#else
   absl::uint128 a64 = absl::Uint128High64(lo_);
   absl::uint128 a00 = absl::Uint128Low64(lo_);
   absl::uint128 b64 = absl::Uint128High64(b.lo_);
   absl::uint128 b00 = absl::Uint128Low64(b.lo_);
-
+#endif
   // Compute the high order and low order part of c (safe to ignore carry bits).
   this->hi_ = hi_ * b.lo_ + a64 * b64 + lo_ * b.hi_;
   this->lo_ = a00 * b00;

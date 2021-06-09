@@ -38,14 +38,16 @@ class NttParametersTest : public testing::Test {};
 TYPED_TEST_SUITE(NttParametersTest, rlwe::testing::ModularIntTypes);
 
 TYPED_TEST(NttParametersTest, LogNumCoeffsTooLarge) {
+  const int max_coeffs = static_cast<int>(rlwe::kMaxLogNumCoeffs);
+
   for (const auto& params :
-       rlwe::testing::ContextParameters<TypeParam>::value) {
+       rlwe::testing::ContextParameters<TypeParam>::Value()) {
     // Do not create a context, since it creates NttParameters already. Instead,
     // create the modulus parameters manually.
     ASSERT_OK_AND_ASSIGN(auto modulus_params,
                          TypeParam::Params::Create(params.modulus));
 
-    int log_n = rlwe::kMaxLogNumCoeffs + 1;
+    int log_n = max_coeffs + 1;
     EXPECT_THAT(
         rlwe::InitializeNttParameters<TypeParam>(log_n, modulus_params.get()),
         StatusIs(
@@ -54,7 +56,7 @@ TYPED_TEST(NttParametersTest, LogNumCoeffsTooLarge) {
                                    rlwe::kMaxLogNumCoeffs, "."))));
 
     log_n = (sizeof(typename TypeParam::Int) * 8) - 1;
-    if (log_n <= rlwe::kMaxLogNumCoeffs) {
+    if (log_n <= max_coeffs) {
       EXPECT_THAT(
           rlwe::InitializeNttParameters<TypeParam>(log_n, modulus_params.get()),
           StatusIs(
@@ -71,7 +73,7 @@ TYPED_TEST(NttParametersTest, PrimitiveNthRootOfUnity) {
   unsigned int len = 5;
 
   for (const auto& params :
-       rlwe::testing::ContextParameters<TypeParam>::value) {
+       rlwe::testing::ContextParameters<TypeParam>::Value()) {
     // Do not create a context, since it creates NttParameters already. Instead,
     // create the modulus parameters manually.
     ASSERT_OK_AND_ASSIGN(auto modulus_params,
@@ -97,7 +99,7 @@ TYPED_TEST(NttParametersTest, PrimitiveNthRootOfUnity) {
 
 TYPED_TEST(NttParametersTest, NttPsis) {
   for (const auto& params :
-       rlwe::testing::ContextParameters<TypeParam>::value) {
+       rlwe::testing::ContextParameters<TypeParam>::Value()) {
     // Do not create a context, since it creates NttParameters already. Instead,
     // create the modulus parameters manually.
     ASSERT_OK_AND_ASSIGN(auto modulus_params,
@@ -131,7 +133,7 @@ TYPED_TEST(NttParametersTest, NttPsis) {
 
 TYPED_TEST(NttParametersTest, NttPsisBitrev) {
   for (const auto& params :
-       rlwe::testing::ContextParameters<TypeParam>::value) {
+       rlwe::testing::ContextParameters<TypeParam>::Value()) {
     // Do not create a context, since it creates NttParameters already. Instead,
     // create the modulus parameters manually.
     ASSERT_OK_AND_ASSIGN(auto modulus_params,
@@ -159,7 +161,7 @@ TYPED_TEST(NttParametersTest, NttPsisBitrev) {
 
 TYPED_TEST(NttParametersTest, NttPsisInvBitrev) {
   for (const auto& params :
-       rlwe::testing::ContextParameters<TypeParam>::value) {
+       rlwe::testing::ContextParameters<TypeParam>::Value()) {
     // Do not create a context, since it creates NttParameters already. Instead,
     // create the modulus parameters manually.
     ASSERT_OK_AND_ASSIGN(auto modulus_params,
@@ -208,7 +210,7 @@ TEST(NttParametersRegularTest, Bitrev) {
 
 TYPED_TEST(NttParametersTest, IncorrectNTTParams) {
   for (const auto& params :
-       rlwe::testing::ContextParameters<TypeParam>::value) {
+       rlwe::testing::ContextParameters<TypeParam>::Value()) {
     // Do not create a context, since it creates NttParameters already. Instead,
     // create the modulus parameters manually.
     // modulus + 2, will no longer be 1 mod 2*n
@@ -227,7 +229,7 @@ TYPED_TEST(NttParametersTest, IncorrectNTTParams) {
 // Test all the NTT Parameter fields.
 TYPED_TEST(NttParametersTest, Initialize) {
   for (const auto& params :
-       rlwe::testing::ContextParameters<TypeParam>::value) {
+       rlwe::testing::ContextParameters<TypeParam>::Value()) {
     // Do not create a context, since it creates NttParameters already. Instead,
     // create the modulus parameters manually.
     ASSERT_OK_AND_ASSIGN(auto modulus_params,
@@ -270,6 +272,15 @@ TYPED_TEST(NttParametersTest, Initialize) {
                     .Mul(psi, modulus_params.get())
                     .Mul(ntt_params.psis_inv_bitrev[i], modulus_params.get())
                     .ExportInt(modulus_params.get()));
+    }
+
+    // Check that the constant representation of the elements of psis_bitrev is
+    // correct.
+    for (unsigned int i = 0; i < n; i++) {
+      const auto& [a, b] =
+          ntt_params.psis_bitrev[i].GetConstant(modulus_params.get());
+      EXPECT_EQ(a, std::get<0>(ntt_params.psis_bitrev_constant[i]));
+      EXPECT_EQ(b, std::get<1>(ntt_params.psis_bitrev_constant[i]));
     }
   }
 }

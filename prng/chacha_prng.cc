@@ -34,7 +34,7 @@ ChaChaPrng::ChaChaPrng(absl::string_view in_key, int position_in_buffer,
 
 rlwe::StatusOr<std::unique_ptr<ChaChaPrng>> ChaChaPrng::Create(
     absl::string_view in_key) {
-  if (in_key.length() != SeedLength()) {
+  if (static_cast<int>(in_key.length()) != SeedLength()) {
     return absl::InvalidArgumentError(
         absl::StrCat("Cannot create Prng with key of the "
                      "wrong size. Real ",

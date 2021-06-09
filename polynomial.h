@@ -87,7 +87,8 @@ class Polynomial {
     }
 
     Polynomial output(std::move(poly_coeffs));
-    output.IterativeCooleyTukey(ntt_params->psis_bitrev, modular_params);
+    output.IterativeCooleyTukey(ntt_params->psis_bitrev_constant,
+                                modular_params);
 
     return output;
   }
@@ -117,7 +118,8 @@ class Polynomial {
       const ModularIntParams* modular_params) const {
     Polynomial copy(*this);
 
-    copy.IterativeGentlemanSande(ntt_params->psis_inv_bitrev, modular_params);
+    copy.IterativeGentlemanSande(ntt_params->psis_inv_bitrev_constant,
+                                 modular_params);
 
     // Normalize the result by multiplying by the inverse of n.
     for (auto& coeff : copy.coeffs_) {
@@ -163,12 +165,14 @@ class Polynomial {
   // Coordinate-wise multiplication in place.
   absl::Status MulInPlace(const Polynomial& that,
                           const ModularIntParams* modular_params) {
-    // If this operation is invalid, return an invalid error.
-    if (Len() != that.Len()) {
-      return absl::InvalidArgumentError(
-          "The polynomials do not have the same length.");
-    }
     return ModularInt::BatchMulInPlace(&coeffs_, that.coeffs_, modular_params);
+  }
+
+  // Fused Multiply Add in place: this += a * b.
+  absl::Status FusedMulAddInPlace(const Polynomial& a, const Polynomial& b,
+                                  const ModularIntParams* modular_params) {
+    return ModularInt::BatchFusedMulAddInPlace(&coeffs_, a.coeffs_, b.coeffs_,
+                                               modular_params);
   }
 
   // Negation.
@@ -183,7 +187,6 @@ class Polynomial {
     for (auto& coeff : coeffs_) {
       coeff.NegateInPlace(modular_params);
     }
-
     return *this;
   }
 
@@ -206,24 +209,12 @@ class Polynomial {
   // Coordinate-wise addition in place.
   absl::Status AddInPlace(const Polynomial& that,
                           const ModularIntParams* modular_params) {
-    // If this operation is invalid, return an invalid error.
-    if (Len() != that.Len()) {
-      return absl::InvalidArgumentError(
-          "The polynomials do not have the same length.");
-    }
-
     return ModularInt::BatchAddInPlace(&coeffs_, that.coeffs_, modular_params);
   }
 
   // Coordinate-wise substraction in place.
   absl::Status SubInPlace(const Polynomial& that,
                           const ModularIntParams* modular_params) {
-    // If this operation is invalid, return an invalid error.
-    if (Len() != that.Len()) {
-      return absl::InvalidArgumentError(
-          "The polynomials do not have the same length.");
-    }
-
     return ModularInt::BatchSubInPlace(&coeffs_, that.coeffs_, modular_params);
   }
 
@@ -288,7 +279,7 @@ class Polynomial {
   int Len() const { return coeffs_.size(); }
 
   // Accessor for coefficients.
-  std::vector<ModularInt> Coeffs() const { return coeffs_; }
+  const std::vector<ModularInt>& Coeffs() const { return coeffs_; }
 
   rlwe::StatusOr<SerializedNttPolynomial> Serialize(
       const ModularIntParams* modular_params) const {
@@ -305,7 +296,7 @@ class Polynomial {
     if (serialized.num_coeffs() <= 0) {
       return absl::InvalidArgumentError(
           "Number of serialized coefficients must be positive.");
-    } else if (serialized.num_coeffs() > kMaxNumCoeffs) {
+    } else if (serialized.num_coeffs() > static_cast<int>(kMaxNumCoeffs)) {
       return absl::InvalidArgumentError(absl::StrCat(
           "Number of serialized coefficients, ", serialized.num_coeffs(),
           ", must be less than ", kMaxNumCoeffs, "."));
@@ -319,22 +310,24 @@ class Polynomial {
   }
 
  private:
-  // Instance variables.
-  size_t log_len_;
-  std::vector<ModularInt> coeffs_;
-
   // Helper function: Perform iterations of the Cooley-Tukey butterfly.
-  void IterativeCooleyTukey(const std::vector<ModularInt>& psis_bitrev,
-                            const ModularIntParams* modular_params) {
+  void IterativeCooleyTukey(
+      const std::vector<
+          std::tuple<typename ModularInt::Int, typename ModularInt::Int>>&
+          psis_bitrev_constant,
+      const ModularIntParams* modular_params) {
     int index_psi = 1;
-    for (int i = log_len_ - 1; i >= 0; i--) {
-      const unsigned int half_m = 1 << i;
-      const unsigned int m = half_m << 1;
+    for (int i = static_cast<int>(log_len_) - 1; i >= 0; i--) {
+      // Layer i.
+      const int half_m = 1 << i;
+      const int m = half_m << 1;
       for (int k = 0; k < Len(); k += m) {
-        const ModularInt psi = psis_bitrev[index_psi];
+        const auto& [psi_constant, psi_constant_barrett] =
+            psis_bitrev_constant[index_psi];
         for (int j = 0; j < half_m; j++) {
           // The Cooley-Tukey butterfly operation.
-          const ModularInt t = psi.Mul(coeffs_[k + j + half_m], modular_params);
+          const ModularInt t = coeffs_[k + j + half_m].MulConstant(
+              psi_constant, psi_constant_barrett, modular_params);
           ModularInt u = coeffs_[k + j];
           coeffs_[k + j].AddInPlace(t, modular_params);
           coeffs_[k + j + half_m] = std::move(u.SubInPlace(t, modular_params));
@@ -345,14 +338,18 @@ class Polynomial {
   }
 
   // Helper function: Perform iterations of the Gentleman-Sande butterfly.
-  void IterativeGentlemanSande(const std::vector<ModularInt>& psis_inv_bitrev,
-                               const ModularIntParams* modular_params) {
+  void IterativeGentlemanSande(
+      const std::vector<
+          std::tuple<typename ModularInt::Int, typename ModularInt::Int>>&
+          psis_inv_bitrev_constant,
+      const ModularIntParams* modular_params) {
     int index_psi_inv = 0;
-    for (int i = 0; i < log_len_; i++) {
-      const unsigned int half_m = 1 << i;
-      const unsigned int m = half_m << 1;
+    for (int i = 0; i < static_cast<int>(log_len_); i++) {
+      const int half_m = 1 << i;
+      const int m = half_m << 1;
       for (int k = 0; k < Len(); k += m) {
-        const ModularInt psi_inv = psis_inv_bitrev[index_psi_inv];
+        const auto& [psi_inv_constant, psi_inv_constant_barrett] =
+            psis_inv_bitrev_constant[index_psi_inv];
         for (int j = 0; j < half_m; j++) {
           // The Gentleman-Sande butterfly operation.
           const ModularInt t = coeffs_[k + j + half_m];
@@ -360,12 +357,18 @@ class Polynomial {
           coeffs_[k + j].AddInPlace(t, modular_params);
           coeffs_[k + j + half_m] =
               std::move(u.SubInPlace(t, modular_params)
-                            .MulInPlace(psi_inv, modular_params));
+                            .MulConstantInPlace(psi_inv_constant,
+                                                psi_inv_constant_barrett,
+                                                modular_params));
         }
         index_psi_inv++;
       }
     }
   }
+
+  // Instance variables.
+  size_t log_len_;
+  std::vector<ModularInt> coeffs_;
 };
 
 template <typename ModularInt, typename Prng = rlwe::SecurePrng>
@@ -380,13 +383,14 @@ rlwe::StatusOr<Polynomial<ModularInt>> SamplePolynomialFromPrng(
         "SamplePolynomialFromPrng: number of coefficients must be a "
         "non-negative integer.");
   }
-  std::vector<ModularInt> a_ntt_coeffs(num_coeffs,
-                                       ModularInt::ImportZero(modulus_params));
+  std::vector<ModularInt> a_ntt_coeffs;
+  a_ntt_coeffs.reserve(num_coeffs);
   for (int i = 0; i < num_coeffs; i++) {
-    RLWE_ASSIGN_OR_RETURN(a_ntt_coeffs[i],
+    RLWE_ASSIGN_OR_RETURN(ModularInt coefficient,
                           ModularInt::ImportRandom(prng, modulus_params));
+    a_ntt_coeffs.push_back(std::move(coefficient));
   }
-  return Polynomial<ModularInt>(a_ntt_coeffs);
+  return Polynomial<ModularInt>(std::move(a_ntt_coeffs));
 }
 
 }  // namespace rlwe
