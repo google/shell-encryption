@@ -29,9 +29,12 @@ absl::Status HkdfPrngResalt(absl::string_view key, int buffer_size,
                             int* salt_counter, int* position_in_buffer,
                             std::vector<Uint8>* buffer) {
   std::string salt = absl::StrCat("salt", *salt_counter);
-  RLWE_ASSIGN_OR_RETURN(
-      auto buf, crypto::tink::subtle::Hkdf::ComputeHkdf(
-                    crypto::tink::subtle::SHA256, key, salt, "", buffer_size));
+  auto status_or_buf = crypto::tink::subtle::Hkdf::ComputeHkdf(
+      crypto::tink::subtle::SHA256, key, salt, "", buffer_size);
+  if (!status_or_buf.ok()) {
+    return status_or_buf.status();
+  }
+  auto buf = std::move(status_or_buf).ValueOrDie();
   buffer->assign(buf.begin(), buf.end());
   ++(*salt_counter);
   *position_in_buffer = 0;

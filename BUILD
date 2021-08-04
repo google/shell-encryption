@@ -140,7 +140,6 @@ cc_test(
 
 cc_library(
     name = "statusor_fork",
-    srcs = ["statusor.cc"],
     hdrs = [
         "status_macros.h",
         "statusor.h",
@@ -149,18 +148,8 @@ cc_library(
         "@com_github_google_glog//:glog",
         "@com_google_absl//absl/base:core_headers",
         "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/types:optional",
-    ],
-)
-
-cc_test(
-    name = "statusor_test",
-    size = "small",
-    srcs = ["statusor_test.cc"],
-    deps = [
-        ":statusor_fork",
-        "@com_github_google_googletest//:gtest_main",
-        "@com_google_absl//absl/status",
     ],
 )
 
@@ -258,6 +247,7 @@ cc_library(
         ":ntt_parameters",
         ":serialization_cc_proto",
         ":statusor_fork",
+        "//opt:constant_polynomial",
         "//prng",
         "@com_google_absl//absl/strings",
     ],
@@ -332,6 +322,7 @@ cc_library(
         ":sample_error",
         ":serialization_cc_proto",
         ":statusor_fork",
+        "//opt:lazy_polynomial",
         "//prng",
         "@com_google_absl//absl/status",
     ],

@@ -26,6 +26,7 @@
 #include "serialization.pb.h"
 #include "status_macros.h"
 #include "statusor.h"
+#include "opt/constant_polynomial.h"
 
 namespace rlwe {
 
@@ -175,6 +176,16 @@ class Polynomial {
                                                modular_params);
   }
 
+  // Fused Multiply Add in place, where the multiplication is with a constant
+  // polynomial.
+  absl::Status FusedMulConstantAddInPlace(
+      const Polynomial& a, const ConstantPolynomial<ModularInt>& b,
+      const ModularIntParams* modular_params) {
+    return ModularInt::BatchFusedMulConstantAddInPlace(
+        &coeffs_, a.coeffs_, b.coeffs_constant_, b.coeffs_constant_barrett_,
+        modular_params);
+  }
+
   // Negation.
   Polynomial Negate(const ModularIntParams* modular_params) const {
     Polynomial output = *this;
@@ -309,6 +320,41 @@ class Polynomial {
     return output;
   }
 
+  // Compute a ConstantPolynomial representation of the coefficients for faster
+  // multiplication.
+  StatusOr<ConstantPolynomial<ModularInt>> ComputeConstantRepresentation(
+      const ModularIntParams* modular_params) const {
+    std::vector<typename ModularInt::Int> coeffs_constant,
+        coeffs_constant_barrett;
+    coeffs_constant.reserve(coeffs_.size());
+    coeffs_constant_barrett.reserve(coeffs_.size());
+    for (const ModularInt& coeff : coeffs_) {
+      const auto [constant, constant_barrett] =
+          coeff.GetConstant(modular_params);
+      coeffs_constant.push_back(constant);
+      coeffs_constant_barrett.push_back(constant_barrett);
+    }
+    return ConstantPolynomial<ModularInt>::Create(
+        std::move(coeffs_constant), std::move(coeffs_constant_barrett));
+  }
+
+  // Coordinate-wise multiplication by a constant polynomial.
+  rlwe::StatusOr<Polynomial> MulConstant(
+      const ConstantPolynomial<ModularInt>& that,
+      const ModularIntParams* modular_params) const {
+    Polynomial output(*this);
+    RLWE_RETURN_IF_ERROR(output.MulConstantInPlace(that, modular_params));
+    return output;
+  }
+
+  // Coordinate-wise multiplication in place by a constant polynomial.
+  absl::Status MulConstantInPlace(const ConstantPolynomial<ModularInt>& that,
+                                  const ModularIntParams* modular_params) {
+    return ModularInt::BatchMulConstantInPlace(&coeffs_, that.coeffs_constant_,
+                                               that.coeffs_constant_barrett_,
+                                               modular_params);
+  }
+
  private:
   // Helper function: Perform iterations of the Cooley-Tukey butterfly.
   void IterativeCooleyTukey(
@@ -329,8 +375,28 @@ class Polynomial {
           const ModularInt t = coeffs_[k + j + half_m].MulConstant(
               psi_constant, psi_constant_barrett, modular_params);
           ModularInt u = coeffs_[k + j];
-          coeffs_[k + j].AddInPlace(t, modular_params);
-          coeffs_[k + j + half_m] = std::move(u.SubInPlace(t, modular_params));
+          // Every odd layer, we perform *lazy operations* (i.e., we do not
+          // reduce in [0, modulus] but keeps the result of the operations in
+          // [0, 2*modulus]). At the beginning of the even layers, the input
+          // will therefore be in [0, 2*modulus] and therefore after applying
+          // addition or subtraction, the result will be in [0, 4*modulus].
+          // Since 4*modulus fits in a Int, this enables the computation to
+          // remains correct: we hence perform the regular modular addition and
+          // subtraction which reduce the values to [0, modulus] at the end of
+          // the even layers.
+          if (i & 1) {
+            coeffs_[k + j].LazyAddInPlace(t, modular_params);
+            // Note that the variable t is reduced in [0, modulus], which is
+            // required by the LazySubInPlace function.
+            coeffs_[k + j + half_m] =
+                std::move(u.LazySubInPlace(t, modular_params));
+          } else {
+            coeffs_[k + j].AddInPlace(t, modular_params);
+            // Note that the variable t is reduced in [0, modulus], which is
+            // required by the SubInPlace function.
+            coeffs_[k + j + half_m] =
+                std::move(u.SubInPlace(t, modular_params));
+          }
         }
         index_psi++;
       }
@@ -355,8 +421,10 @@ class Polynomial {
           const ModularInt t = coeffs_[k + j + half_m];
           ModularInt u = coeffs_[k + j];
           coeffs_[k + j].AddInPlace(t, modular_params);
+          // Since the input to MulConstantInPlace can be in [0, 2*modulus], we
+          // only perform a lazy subtraction.
           coeffs_[k + j + half_m] =
-              std::move(u.SubInPlace(t, modular_params)
+              std::move(u.LazySubInPlace(t, modular_params)
                             .MulConstantInPlace(psi_inv_constant,
                                                 psi_inv_constant_barrett,
                                                 modular_params));

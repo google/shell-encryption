@@ -341,6 +341,8 @@ class ABSL_MUST_USE_RESULT MontgomeryInt {
 
   // This function should remains in the header file to avoid performance
   // regressions.
+  // The value this->n_ can be in [0, 4*modulus] since this operation is
+  // actually a multiplication over a BigInt followed by a Barrett reduction.
   MontgomeryInt& MulConstantInPlace(const Int& constant,
                                     const Int& constant_barrett,
                                     const Params* params) {
@@ -361,6 +363,7 @@ class ABSL_MUST_USE_RESULT MontgomeryInt {
 
   // This function should remains in the header file to avoid performance
   // regressions.
+  // The sum of this->n_ + that.n_ needs to be in [0, 4 * modulus].
   MontgomeryInt& AddInPlace(const MontgomeryInt& that, const Params* params) {
     // We can use Barrett reduction because n_ <= modulus < Max(Int)/4.
     n_ = params->BarrettReduce(n_ + that.n_);
@@ -387,9 +390,40 @@ class ABSL_MUST_USE_RESULT MontgomeryInt {
 
   // This function should remains in the header file to avoid performance
   // regressions.
+  // The value this->n_ can be in [0, 3*modulus] and that.n_ needs to be in
+  // [0, modulus].
   MontgomeryInt& SubInPlace(const MontgomeryInt& that, const Params* params) {
     // We can use Barrett reduction because n_ <= modulus < Max(Int)/4.
     n_ = params->BarrettReduce(n_ + (params->modulus - that.n_));
+    return *this;
+  }
+
+  // We enable lazy additions and lazy multiplications, where the output is not
+  // assured to be in [0, modulus]. A lazy addition adds the underlying
+  // Montgomery integers, whereas a lazy addition adds the left hand side with
+  // modulus minus the right hand side.
+  // These operations can be used in place of addition and subtraction, as long
+  // as a Barrett reduction is performed on the value before the MontgomeryInt
+  // is used in the rest of the library.
+  //
+  // As an example, these operations are used when performing an NTT operation
+  // on all odd layers.
+  //
+  // These functions should remains in the header file to avoid performance
+  // regressions.
+
+  // The sum of this->n_ + that.n_ needs to be in [0, 4 * modulus].
+  MontgomeryInt& LazyAddInPlace(const MontgomeryInt& that,
+                                const Params* params) {
+    n_ += that.n_;
+    return *this;
+  }
+
+  // The value this->n_ can be in [0, 3*modulus] and that.n_ needs to be in
+  // [0, modulus].
+  MontgomeryInt& LazySubInPlace(const MontgomeryInt& that,
+                                const Params* params) {
+    n_ += (params->modulus - that.n_);
     return *this;
   }
 

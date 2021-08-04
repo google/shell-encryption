@@ -679,6 +679,91 @@ TYPED_TEST(SymmetricRlweEncryptionTest, FusedAbsorbAddFailsWithDifferentS) {
   }
 }
 
+// Check that the fused homomorphic absorption then addition in place operation
+// works.
+TYPED_TEST(SymmetricRlweEncryptionTest, FusedAbsorbAddInPlaceLazily) {
+  for (const auto& params :
+       rlwe::testing::ContextParameters<TypeParam>::Value()) {
+    ASSERT_OK_AND_ASSIGN(auto context,
+                         rlwe::RlweContext<TypeParam>::Create(params));
+    for (unsigned int i = 0; i < kTestingRounds; i++) {
+      ASSERT_OK_AND_ASSIGN(auto key, this->SampleKey(context.get()));
+
+      // Create the initial plaintexts.
+      std::vector<typename TypeParam::Int> plaintext1 =
+          rlwe::testing::SamplePlaintext<TypeParam>(context->GetN(),
+                                                    context->GetT());
+      ASSERT_OK_AND_ASSIGN(auto m_plaintext1,
+                           rlwe::testing::ConvertToMontgomery<TypeParam>(
+                               plaintext1, context->GetModulusParams()));
+      rlwe::Polynomial<TypeParam> plaintext1_ntt =
+          rlwe::Polynomial<TypeParam>::ConvertToNtt(
+              m_plaintext1, context->GetNttParams(),
+              context->GetModulusParams());
+      std::vector<typename TypeParam::Int> plaintext2 =
+          rlwe::testing::SamplePlaintext<TypeParam>(context->GetN(),
+                                                    context->GetT());
+      ASSERT_OK_AND_ASSIGN(auto m_plaintext2,
+                           rlwe::testing::ConvertToMontgomery<TypeParam>(
+                               plaintext2, context->GetModulusParams()));
+      rlwe::Polynomial<TypeParam> plaintext2_ntt =
+          rlwe::Polynomial<TypeParam>::ConvertToNtt(
+              m_plaintext2, context->GetNttParams(),
+              context->GetModulusParams());
+
+      std::vector<typename TypeParam::Int> to_absorb =
+          rlwe::testing::SamplePlaintext<TypeParam>(context->GetN(),
+                                                    context->GetT());
+      ASSERT_OK_AND_ASSIGN(auto m_to_absorb,
+                           rlwe::testing::ConvertToMontgomery<TypeParam>(
+                               to_absorb, context->GetModulusParams()));
+      rlwe::Polynomial<TypeParam> to_absorb_ntt =
+          rlwe::Polynomial<TypeParam>::ConvertToNtt(
+              m_to_absorb, context->GetNttParams(),
+              context->GetModulusParams());
+
+      // Create our expected value.
+      ASSERT_OK_AND_ASSIGN(
+          rlwe::Polynomial<TypeParam> absorbed,
+          plaintext2_ntt.Mul(to_absorb_ntt, context->GetModulusParams()));
+      ASSERT_OK_AND_ASSIGN(
+          rlwe::Polynomial<TypeParam> expected_ntt,
+          plaintext1_ntt.Add(absorbed, context->GetModulusParams()));
+      std::vector<typename TypeParam::Int> expected =
+          rlwe::RemoveError<TypeParam>(
+              expected_ntt.InverseNtt(context->GetNttParams(),
+                                      context->GetModulusParams()),
+              context->GetModulus(), context->GetT(),
+              context->GetModulusParams());
+
+      // Encrypt, absorb in place, and decrypt.
+      ASSERT_OK_AND_ASSIGN(auto ciphertext1,
+                           this->Encrypt(key, plaintext1, context.get()));
+      ASSERT_OK_AND_ASSIGN(auto ciphertext2,
+                           this->Encrypt(key, plaintext2, context.get()));
+      ASSERT_OK(
+          ciphertext1.FusedAbsorbAddInPlaceLazily(ciphertext2, to_absorb_ntt));
+
+      // Only a lazy operation has been performed, and has not been merged with
+      // the ciphertext. So the equality should not hold.
+      ASSERT_OK_AND_ASSIGN(std::vector<typename TypeParam::Int> decrypted,
+                           rlwe::Decrypt<TypeParam>(key, ciphertext1));
+      EXPECT_NE(expected, decrypted);
+
+      // After merging, equality should hold.
+      ASSERT_OK(ciphertext1.MergeLazyOperations());
+      ASSERT_OK_AND_ASSIGN(decrypted,
+                           rlwe::Decrypt<TypeParam>(key, ciphertext1));
+      EXPECT_EQ(expected, decrypted);
+
+      // ciphertext1 has no lazy_ member anymore, so we cannot merge again.
+      EXPECT_THAT(ciphertext1.MergeLazyOperations(),
+                  StatusIs(absl::StatusCode::kFailedPrecondition,
+                           HasSubstr("not in lazy mode")));
+    }
+  }
+}
+
 // Check that homomorphic absorption of a scalar works.
 TYPED_TEST(SymmetricRlweEncryptionTest, AbsorbScalar) {
   for (const auto& params :

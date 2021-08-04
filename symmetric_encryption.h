@@ -25,6 +25,7 @@
 
 #include "absl/status/status.h"
 #include "error_params.h"
+#include "opt/lazy_polynomial.h"
 #include "polynomial.h"
 #include "prng/prng.h"
 #include "sample_error.h"
@@ -274,6 +275,122 @@ class SymmetricRlweCiphertext {
     return absl::OkStatus();
   }
 
+  // Fused operation that absorbs a polynomial in a ciphertext, and then add the
+  // result in place lazily.
+  //
+  // Using this function makes the ciphertext hold another member, a vector of
+  // lazy polynomials, which can be fused-mul add in place.
+  //
+  // The ciphertext is NOT modified until the `MergeLazyOperations()` function
+  // is called.
+  absl::Status FusedAbsorbAddInPlaceLazily(const SymmetricRlweCiphertext& a,
+                                           const Polynomial<ModularInt>& b) {
+    const size_t size_a = a.c_.size();
+    if (power_of_s_ != a.power_of_s_) {
+      return absl::InvalidArgumentError(
+          "Ciphertexts must be encrypted with the same key power.");
+    }
+    if (size_a == 0) {
+      return absl::OkStatus();
+    }
+
+    // Update the error
+    error_ += a.error_ * error_params_->B_plaintext();
+
+    // Get the coefficients of the polynomial b.
+    const auto& bc = b.Coeffs();
+
+    // If lazy_ is empty, this is the first time we call this function.
+    // We therefore create the vector of lazy polynomials using the input
+    // parameters a and b.
+    if (lazy_.size() == 0) {
+      lazy_.reserve(size_a);
+      for (const auto aj : a.c_) {
+        RLWE_ASSIGN_OR_RETURN(auto lazy_poly,
+                              (LazyPolynomial<ModularInt, BigInt>::Create(
+                                  aj.Coeffs(), bc, modulus_params_)));
+        lazy_.push_back(std::move(lazy_poly));
+      }
+      return absl::OkStatus();
+    }
+
+    // lazy_ is not empty, which means that we continue to perform lazy
+    // operations.
+
+    // If a has more polynomials, we extend the current number of lazy
+    // polynomials to match that of a.
+    if (size_a > lazy_.size()) {
+      RLWE_ASSIGN_OR_RETURN(auto lazy_poly_zero,
+                            (LazyPolynomial<ModularInt, BigInt>::CreateEmpty(
+                                a.c_[0].Len(), modulus_params_)));
+      lazy_.resize(size_a, lazy_poly_zero);
+    }
+
+    // Fused mul-add in place over the lazy polynomials.
+    for (size_t j = 0; j < lazy_.size(); j++) {
+      RLWE_RETURN_IF_ERROR(
+          lazy_[j].FusedMulAddInPlace(a.c_[j].Coeffs(), bc, modulus_params_));
+    }
+
+    return absl::OkStatus();
+  }
+
+  // This operation can only be called after the `FusedAbsorbAddInPlaceLazily()`
+  // function has been used on the ciphertext, and modifies the value of the
+  // ciphertext after the lazy operations have been performed.
+  absl::Status MergeLazyOperations() {
+    if (lazy_.empty()) {
+      // It is not really required to throw an error because the content of c_
+      // is not modified, but raising this branch means the underlying code is
+      // not using lazy operations, so there is really no reason to call this
+      // function. We throw an error to force the developer to check their code.
+      return absl::FailedPreconditionError(
+          "The ciphertext was not in lazy mode.");
+    }
+    c_.reserve(lazy_.size());
+    // If some coefficients of c_ already exist, add the content of lazy_ to
+    // them.
+    for (size_t i = 0; i < lazy_.size() && i < c_.size(); i++) {
+      RLWE_RETURN_IF_ERROR(
+          c_[i].AddInPlace(lazy_[i].Export(modulus_params_), modulus_params_));
+    }
+    // If lazy_ is larger than c_, add to c_ the new polynomials.
+    for (size_t i = c_.size(); i < lazy_.size(); i++) {
+      c_.push_back(lazy_[i].Export(modulus_params_));
+    }
+    lazy_.clear();
+    return absl::OkStatus();
+  }
+
+  absl::Status FusedAbsorbConstantAddInPlace(
+      const SymmetricRlweCiphertext& a,
+      const ConstantPolynomial<ModularInt>& b) {
+    if (power_of_s_ != a.power_of_s_) {
+      return absl::InvalidArgumentError(
+          "Ciphertexts must be encrypted with the same key power.");
+    }
+
+    // Compute c_[i] += a.c_[i] * b, if possible.
+    for (int i = 0; i < c_.size() && i < a.c_.size(); i++) {
+      RLWE_RETURN_IF_ERROR(
+          c_[i].FusedMulConstantAddInPlace(a.c_[i], b, modulus_params_));
+    }
+
+    // If a.c_ was longer, absorb and store in c_.
+    if (a.c_.size() > c_.size()) {
+      c_.reserve(a.c_.size());
+      for (int i = c_.size(); i < a.c_.size(); i++) {
+        RLWE_ASSIGN_OR_RETURN(auto product,
+                              a.c_[i].MulConstant(b, a.modulus_params_));
+        c_.push_back(std::move(product));
+      }
+    }
+
+    // Update the error
+    error_ += a.error_ * error_params_->B_plaintext();
+    return absl::OkStatus();
+  }
+
   // Homomorphic multiply. Given two ciphertexts {m1}_s, {m2}_s containing
   // messages m1 and m2 encrypted with the same secret key s, return the
   // ciphertext {m1 * m2}_s containing the product of the messages.
@@ -475,6 +592,8 @@ class SymmetricRlweCiphertext {
  private:
   // The ciphertext.
   std::vector<Polynomial<ModularInt>> c_;
+
+  std::vector<LazyPolynomial<ModularInt, BigInt>> lazy_;
 
   // ModularInt parameters.
   const typename ModularInt::Params* modulus_params_;
