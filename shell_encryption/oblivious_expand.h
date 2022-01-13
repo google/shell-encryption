@@ -17,7 +17,10 @@
 #ifndef PRIVACY_PRIVATE_RETRIEVAL_EXPAND_H_
 #define PRIVACY_PRIVATE_RETRIEVAL_EXPAND_H_
 
+#include <iterator>
+
 #include "absl/memory/memory.h"
+#include "absl/status/status.h"
 #include "shell_encryption/galois_key.h"
 #include "shell_encryption/integral_types.h"
 #include "shell_encryption/ntt_parameters.h"
@@ -90,6 +93,14 @@ class ObliviousExpander {
   virtual StatusOr<std::vector<SymmetricRlweCiphertext<ModularInt>>>
   ObliviousExpand(std::vector<SymmetricRlweCiphertext<ModularInt>> ciphertexts,
                   int levels_of_expand, int output_length) {
+    if (output_length < 0) {
+      return absl::InvalidArgumentError("Output length must be at least 0");
+    }
+    if (levels_of_expand < 0 || levels_of_expand >= 32) {
+      return absl::InvalidArgumentError(
+          "The number of levels of expansion must fall within [0, 32)");
+    }
+
     // If the number of ciphertexts is already output_length, return
     // ciphertexts.
     if (ciphertexts.size() == output_length) {
@@ -114,9 +125,14 @@ class ObliviousExpander {
                     std::make_move_iterator(expanded.end()));
     }
 
-    return std::vector<SymmetricRlweCiphertext<ModularInt>>(
-        std::make_move_iterator(result.begin()),
-        std::make_move_iterator(result.begin() + output_length));
+    if (result.size() > output_length) {
+      result.erase(result.begin() + output_length, result.end());
+    } else if (result.size() < output_length) {
+      return absl::InvalidArgumentError(
+          "Insufficient result ciphertexts generated");
+    }
+
+    return result;
   }
 
   // Computes the normalizer user in ObliviousExpand with
@@ -415,6 +431,9 @@ StatusOr<std::vector<Polynomial<ModularInt>>> MakeCompressedVector(
     int total_size, const std::vector<int>& indices, int log_compression_factor,
     const typename ModularInt::Params* modulus_params,
     const NttParameters<ModularInt>* ntt_params) {
+  if (modulus_params == nullptr || ntt_params == nullptr) {
+    return absl::InvalidArgumentError("Parameters are null.");
+  }
   int compression_factor = 1 << log_compression_factor;
   // Check error conditions.
   if (compression_factor > ntt_params->number_coeffs) {

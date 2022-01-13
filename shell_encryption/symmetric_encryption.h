@@ -1078,19 +1078,29 @@ rlwe::StatusOr<SymmetricRlweCiphertext<ModularInt>> Encrypt(
 //            -1 (mod 7) - 7 (mod 2) = 6 - 1 = 5
 //
 // 5 (mod t) = 1, which is the original message.
+//
+// If t is 0, this will return `error_and_message` unmodified, as this implies
+// that no error was added.
 template <typename ModularInt>
 std::vector<typename ModularInt::Int> RemoveError(
     const std::vector<ModularInt>& error_and_message,
     const typename ModularInt::Int& q, const typename ModularInt::Int& t,
     const typename ModularInt::Params* modulus_params_q) {
   using Int = typename ModularInt::Int;
-  Int q_mod_t = q % t;
   Int zero = modulus_params_q->Zero();
+
   std::vector<Int> plaintext(error_and_message.size(), zero);
-
-  for (size_t i = 0; i < error_and_message.size(); i++) {
+  for (size_t i = 0; i < error_and_message.size(); ++i) {
     plaintext[i] = error_and_message[i].ExportInt(modulus_params_q);
+  }
 
+  if (t == zero) {
+    return plaintext;
+  }
+
+  Int q_mod_t = q % t;
+
+  for (size_t i = 0; i < error_and_message.size(); ++i) {
     if (plaintext[i] > (q >> 1)) {
       plaintext[i] = plaintext[i] - q_mod_t;
     }
@@ -1131,11 +1141,15 @@ rlwe::StatusOr<std::vector<typename ModularInt::Int>> Decrypt(
     const SymmetricRlweCiphertext<ModularInt>& ciphertext) {
   RLWE_ASSIGN_OR_RETURN(std::vector<ModularInt> error_and_message,
                         internal::ExtractErrorAndMessage(key, ciphertext));
+
+  auto t = key.PlaintextModulus().ExportInt(key.PlaintextModulusParams());
+  if (t == key.PlaintextModulusParams()->Zero()) {
+    return absl::InvalidArgumentError("t is zero");
+  }
+
   // Extract the message.
   return RemoveError<ModularInt>(
-      error_and_message, key.ModulusParams()->modulus,
-      key.PlaintextModulus().ExportInt(key.PlaintextModulusParams()),
-      key.ModulusParams());
+      error_and_message, key.ModulusParams()->modulus, t, key.ModulusParams());
 }
 
 }  // namespace rlwe
