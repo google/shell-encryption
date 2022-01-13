@@ -19,14 +19,16 @@
 #include <cmath>
 #include <vector>
 
+#include "absl/status/status.h"
 #include "absl/strings/str_cat.h"
+#include "absl/strings/str_format.h"
 #include "shell_encryption/constants.h"
 #include "shell_encryption/ntt_parameters.h"
+#include "shell_encryption/opt/constant_polynomial.h"
 #include "shell_encryption/prng/prng.h"
 #include "shell_encryption/serialization.pb.h"
 #include "shell_encryption/status_macros.h"
 #include "shell_encryption/statusor.h"
-#include "shell_encryption/opt/constant_polynomial.h"
 
 namespace rlwe {
 
@@ -114,13 +116,23 @@ class Polynomial {
   // At the end of the computation, a normalization step by the inverse of
   // n=2^log(n) (the factor 2 obtained at each level of the butterfly) is
   // required.
+  //
+  // Returns a copy of the polynomial on errors.
   std::vector<ModularInt> InverseNtt(
       const NttParameters<ModularInt>* ntt_params,
       const ModularIntParams* modular_params) const {
+    if (ntt_params == nullptr || modular_params == nullptr ||
+        !ntt_params->n_inv_ptr.has_value()) {
+      return coeffs_;
+    }
+
     Polynomial copy(*this);
 
-    copy.IterativeGentlemanSande(ntt_params->psis_inv_bitrev_constant,
-                                 modular_params);
+    if (!copy.IterativeGentlemanSande(ntt_params->psis_inv_bitrev_constant,
+                                      modular_params)
+             .ok()) {
+      return coeffs_;
+    }
 
     // Normalize the result by multiplying by the inverse of n.
     for (auto& coeff : copy.coeffs_) {
@@ -253,6 +265,11 @@ class Polynomial {
     // Update the coefficients one by one: remember that they are stored in
     // bitreversed order.
     for (int i = 0; i < Len(); i++) {
+      if (ntt_params->bitrevs[psi_power_index] >= coeffs_.size()) {
+        return absl::InternalError(absl::StrFormat(
+            "Index %d out-of-bounds in coeffs_ of size %d.",
+            ntt_params->bitrevs[psi_power_index], coeffs_.size()));
+      }
       out.coeffs_[ntt_params->bitrevs[i]] =
           coeffs_[ntt_params->bitrevs[psi_power_index]];
       // Each time the index increases by 1, the psi_power_index increases by
@@ -404,7 +421,7 @@ class Polynomial {
   }
 
   // Helper function: Perform iterations of the Gentleman-Sande butterfly.
-  void IterativeGentlemanSande(
+  absl::Status IterativeGentlemanSande(
       const std::vector<
           std::tuple<typename ModularInt::Int, typename ModularInt::Int>>&
           psis_inv_bitrev_constant,
@@ -414,10 +431,17 @@ class Polynomial {
       const int half_m = 1 << i;
       const int m = half_m << 1;
       for (int k = 0; k < Len(); k += m) {
+        if (index_psi_inv >= psis_inv_bitrev_constant.size()) {
+          return absl::InvalidArgumentError("Not enough psis provided.");
+        }
         const auto& [psi_inv_constant, psi_inv_constant_barrett] =
             psis_inv_bitrev_constant[index_psi_inv];
         for (int j = 0; j < half_m; j++) {
           // The Gentleman-Sande butterfly operation.
+          if (k + j + half_m >= coeffs_.size()) {
+            return absl::InvalidArgumentError(
+                "Polynomial too short for applying iterative Gentleman-Sande.");
+          }
           const ModularInt t = coeffs_[k + j + half_m];
           ModularInt u = coeffs_[k + j];
           coeffs_[k + j].AddInPlace(t, modular_params);
@@ -432,6 +456,8 @@ class Polynomial {
         index_psi_inv++;
       }
     }
+
+    return absl::OkStatus();
   }
 
   // Instance variables.

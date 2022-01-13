@@ -249,6 +249,8 @@ cc_library(
         ":statusor_fork",
         "//shell_encryption/opt:constant_polynomial",
         "//shell_encryption/prng",
+        "@com_google_absl//absl/strings:str_format",
+        "@com_google_absl//absl/status",
         "@com_google_absl//absl/strings",
     ],
 )
@@ -532,6 +534,7 @@ cc_library(
         ":statusor_fork",
         ":symmetric_encryption",
         "@com_google_absl//absl/memory",
+        "@com_google_absl//absl/status",
     ],
 )
 
