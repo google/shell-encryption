@@ -190,12 +190,32 @@ TYPED_TEST(ErrorParamsTest, RelinearizationErrorScalesWithT) {
        rlwe::testing::ContextParameters<TypeParam>::Value()) {
     ASSERT_OK_AND_ASSIGN(auto context,
                          rlwe::RlweContext<TypeParam>::Create(params));
+    // Compute the error size when relinearization key has 1 part.
+    int num_applied_components = 1;
     // Error scales by (T / logT) when all other constants are fixed.
     int small_decomposition_modulus = 1;
     int large_decomposition_modulus = 10;
-    EXPECT_LT(
-        context->GetErrorParams()->B_relinearize(small_decomposition_modulus),
-        context->GetErrorParams()->B_relinearize(large_decomposition_modulus));
+    EXPECT_LT(context->GetErrorParams()->B_relinearize(
+                  num_applied_components, small_decomposition_modulus),
+              context->GetErrorParams()->B_relinearize(
+                  num_applied_components, large_decomposition_modulus));
+  }
+}
+
+TYPED_TEST(ErrorParamsTest, RelinearizationErrorScalesWithNumComponents) {
+  for (const auto& params :
+       rlwe::testing::ContextParameters<TypeParam>::Value()) {
+    ASSERT_OK_AND_ASSIGN(auto context,
+                         rlwe::RlweContext<TypeParam>::Create(params));
+    static constexpr int k_decomposition_modulus = 10;
+    // Error increases when applied to a longer ciphertext with all other
+    // constants fixed.
+    int short_num_components = 1;
+    int long_num_components = 3;
+    EXPECT_LT(context->GetErrorParams()->B_relinearize(short_num_components,
+                                                       k_decomposition_modulus),
+              context->GetErrorParams()->B_relinearize(
+                  long_num_components, k_decomposition_modulus));
   }
 }
 

@@ -17,7 +17,9 @@
 #ifndef PRIVACY_PRIVATE_RETRIEVAL_EXPAND_H_
 #define PRIVACY_PRIVATE_RETRIEVAL_EXPAND_H_
 
+#include <cmath>
 #include <iterator>
+#include <memory>
 
 #include "absl/memory/memory.h"
 #include "absl/status/status.h"
@@ -173,6 +175,11 @@ class ObliviousExpander {
     int output_size = 1 << levels_of_expand;
     RLWE_ASSIGN_OR_RETURN(auto comp0, ciphertext.Component(0));
     int num_coeffs = comp0.Len();
+    if (num_coeffs != ntt_params_->number_coeffs) {
+      return absl::InvalidArgumentError(
+          absl::StrCat("Ciphertext in request must have ",
+                       ntt_params_->number_coeffs, " coefficients"));
+    }
 
     std::vector<SymmetricRlweCiphertext<ModularInt>> result(
         output_size, SymmetricRlweCiphertext<ModularInt>(
@@ -245,7 +252,7 @@ class GaloisKeysObliviousExpander : public ObliviousExpander<ModularInt> {
       key_index_for_substitution[substitution_power] = i;
     }
 
-    return absl::make_unique<GaloisKeysObliviousExpander>(
+    return std::make_unique<GaloisKeysObliviousExpander>(
         std::move(galois_keys), std::move(key_index_for_substitution), log_t,
         modulus_params, ntt_params);
   }
@@ -300,7 +307,7 @@ class GaloisGeneratorObliviousExpander : public ObliviousExpander<ModularInt> {
                        kSubstitutionGenerator));
     }
 
-    return absl::make_unique<GaloisGeneratorObliviousExpander>(
+    return std::make_unique<GaloisGeneratorObliviousExpander>(
         std::move(galois_generator), log_t, modulus_params, ntt_params);
   }
 
@@ -389,8 +396,8 @@ class DefaultObliviousExpander : public ObliviousExpander<ModularInt> {
   static StatusOr<std::unique_ptr<DefaultObliviousExpander>> Create(
       const int log_t, const typename ModularInt::Params* modulus_params,
       const NttParameters<ModularInt>* ntt_params) {
-    return absl::make_unique<DefaultObliviousExpander>(log_t, modulus_params,
-                                                       ntt_params);
+    return std::make_unique<DefaultObliviousExpander>(log_t, modulus_params,
+                                                      ntt_params);
   }
 
   DefaultObliviousExpander(const int log_t,
@@ -434,22 +441,34 @@ StatusOr<std::vector<Polynomial<ModularInt>>> MakeCompressedVector(
   if (modulus_params == nullptr || ntt_params == nullptr) {
     return absl::InvalidArgumentError("Parameters are null.");
   }
+
+  if (total_size <= 0) {
+    return absl::InvalidArgumentError("Total size must be strictly positive");
+  }
+
+  if (log_compression_factor < 0 || log_compression_factor >= 32) {
+    return absl::InvalidArgumentError(
+        "Log of compression factor must fall within [0, 31]");
+  }
+
   int compression_factor = 1 << log_compression_factor;
   // Check error conditions.
-  if (compression_factor > ntt_params->number_coeffs) {
-    return absl::InvalidArgumentError(absl::StrCat(
-        "Compression factor must be less than ", ntt_params->number_coeffs));
+  if (compression_factor <= 0 ||
+      compression_factor > ntt_params->number_coeffs) {
+    return absl::InvalidArgumentError(
+        absl::StrCat("Compression factor must fall within [1, ",
+                     ntt_params->number_coeffs, "]"));
   }
 
   // Initialize the coefficients of the response to 0.
   std::vector<ModularInt> zero_vec(ntt_params->number_coeffs,
                                    ModularInt::ImportZero(modulus_params));
   int size_compression =
-      ceil(total_size / static_cast<double>(compression_factor));
+      std::ceil(total_size / static_cast<double>(compression_factor));
   std::vector<std::vector<ModularInt>> vector_coefficients(size_compression,
                                                            zero_vec);
 
-  for (const int& index : indices) {
+  for (int index : indices) {
     if (index < 0 || index >= total_size) {
       return absl::InvalidArgumentError("Index out of range for total size.");
     }

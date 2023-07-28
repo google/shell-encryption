@@ -20,6 +20,8 @@
 #include <vector>
 
 #include "absl/strings/str_cat.h"
+
+
 #include "shell_encryption/relinearization_key.h"
 #include "shell_encryption/status_macros.h"
 #include "shell_encryption/statusor.h"
@@ -49,7 +51,7 @@ class GaloisKey {
   // power of x in the secret key polynomial s(x^substitution_power) that the
   // ciphertext is encrypted with. The prng_seed is used to generate and encode
   // the bottom row of the matrix, which consists of random entries.
-  static rlwe::StatusOr<GaloisKey> Create(
+  static  rlwe::StatusOr<GaloisKey> Create(
       const SymmetricRlweKey<ModularInt>& key, PrngType prng_type,
       Uint64 substitution_power, Uint64 log_decomposition_modulus) {
     RLWE_ASSIGN_OR_RETURN(auto relinearization_key,
@@ -88,7 +90,7 @@ class GaloisKey {
   // SerializedGaloisKey is (2 * num_parts * dimension) where dimension is the
   // number of digits needed to represent the modulus in base
   // 2^{log_decomposition_modulus}. Crashes for non-valid input parameters.
-  static rlwe::StatusOr<GaloisKey> Deserialize(
+  static  rlwe::StatusOr<GaloisKey> Deserialize(
       const SerializedGaloisKey& serialized,
       const typename ModularInt::Params* modulus_params,
       const NttParameters<ModularInt>* ntt_params) {
@@ -109,6 +111,11 @@ class GaloisKey {
   // A relinearization key.
   RelinearizationKey<ModularInt> relinearization_key_;
 };
+
+template class GaloisKey<rlwe::MontgomeryInt<Uint16>>;
+template class GaloisKey<rlwe::MontgomeryInt<Uint32>>;
+template class GaloisKey<rlwe::MontgomeryInt<Uint64>>;
+template class GaloisKey<rlwe::MontgomeryInt<absl::uint128>>;
 
 }  //  namespace rlwe
 

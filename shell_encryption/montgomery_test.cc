@@ -23,6 +23,8 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 #include "absl/numeric/int128.h"
+
+
 #include "shell_encryption/constants.h"
 #include "shell_encryption/serialization.pb.h"
 #include "shell_encryption/status_macros.h"
@@ -81,7 +83,8 @@ inline unsigned __int128 GetIntMax<unsigned __int128>() {
 #endif
 
 template <typename T>
-class MontgomeryTest : public ::testing::Test {};
+class
+    MontgomeryTest : public ::testing::Test {};
 TYPED_TEST_SUITE(MontgomeryTest, testing::ModularIntTypes);
 
 TYPED_TEST(MontgomeryTest, ModulusTooLarge) {
@@ -630,7 +633,7 @@ TYPED_TEST(MontgomeryTest, EmptyVectorSerialization) {
 
 TYPED_TEST(MontgomeryTest, VectorSerialization) {
   // Prng to generate random values
-  auto prng = absl::make_unique<rlwe::testing::TestingPrng>(0);
+  auto prng = std::make_unique<rlwe::testing::TestingPrng>(0);
 
   for (const auto& params :
        rlwe::testing::ContextParameters<TypeParam>::Value()) {
@@ -703,8 +706,8 @@ TYPED_TEST(MontgomeryTest, ImportRandomWithPrngWithSameKeys) {
     ASSERT_OK_AND_ASSIGN(auto modulus_params,
                          TypeParam::Params::Create(params.modulus));
 
-    auto prng1 = absl::make_unique<rlwe::testing::TestingPrng>(seed_prng);
-    auto prng2 = absl::make_unique<rlwe::testing::TestingPrng>(seed_prng);
+    auto prng1 = std::make_unique<rlwe::testing::TestingPrng>(seed_prng);
+    auto prng2 = std::make_unique<rlwe::testing::TestingPrng>(seed_prng);
 
     ASSERT_OK_AND_ASSIGN(
         auto r1, TypeParam::ImportRandom(prng1.get(), modulus_params.get()));
@@ -724,8 +727,8 @@ TYPED_TEST(MontgomeryTest, ImportRandomWithPrngWithDifferentKeys) {
     ASSERT_OK_AND_ASSIGN(auto modulus_params,
                          TypeParam::Params::Create(params.modulus));
 
-    auto prng1 = absl::make_unique<rlwe::testing::TestingPrng>(seed_prng1);
-    auto prng2 = absl::make_unique<rlwe::testing::TestingPrng>(seed_prng2);
+    auto prng1 = std::make_unique<rlwe::testing::TestingPrng>(seed_prng1);
+    auto prng2 = std::make_unique<rlwe::testing::TestingPrng>(seed_prng2);
     ASSERT_OK_AND_ASSIGN(
         auto r1, TypeParam::ImportRandom(prng1.get(), modulus_params.get()));
     ASSERT_OK_AND_ASSIGN(
@@ -763,7 +766,7 @@ TYPED_TEST(MontgomeryTest, BatchOperations) {
 
   unsigned int seed = 0;
   unsigned int seed_prng = GenerateRandom<unsigned int>(&seed);
-  auto prng = absl::make_unique<rlwe::testing::TestingPrng>(seed_prng);
+  auto prng = std::make_unique<rlwe::testing::TestingPrng>(seed_prng);
 
   for (const auto& params :
        rlwe::testing::ContextParameters<TypeParam>::Value()) {

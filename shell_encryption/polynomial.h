@@ -23,6 +23,7 @@
 #include "absl/strings/str_cat.h"
 #include "absl/strings/str_format.h"
 #include "shell_encryption/constants.h"
+#include "shell_encryption/dft_transformations.h"
 #include "shell_encryption/ntt_parameters.h"
 #include "shell_encryption/opt/constant_polynomial.h"
 #include "shell_encryption/prng/prng.h"
@@ -57,43 +58,24 @@ class Polynomial {
 
   // This is an implementation of the FFT from [Sei18, Sec. 2].
   // [Sei18] https://eprint.iacr.org/2018/039
-  // All polynomial arithmetic performed is modulo (x^n+1) for n a power of two,
-  // with the coefficients operated on modulo a prime modulus.
-  //
-  // Let psi be a primitive 2n-th root of the unity, i.e., psi is a 2n-th root
-  // of unity such that psi^n = -1. Hence it holds that
-  //           x^n+1 = x^n-psi^n = (x^n/2-psi^n/2)*(x^n/2+psi^n/2)
-  //
-  //
-  // If f = f_0 + f_1*x + ... + f_{n-1}*x^(n-1) is the polynomial to transform,
-  // the i-th coefficient of the polynomial mod x^n/2-psi^n/2 can thus be
-  // computed as
-  //            f'_i = f_i + psi^(n/2)*f_(n/2+i),
-  // and the i-th coefficient of the polynomial mod x^n/2+psi^n/2 can thus be
-  // computed as
-  //            f''_i = f_i - psi^(n/2)*f_(n/2+i)
-  // This operation is called the Cooley-Tukey butterfly and is done
-  // iteratively during the NTT.
-  //
-  // The FFT can thus be performed in-place and after the k-th level, it
-  // produces the vector of polynomials with pairs of coefficients
-  //  f mod (x^(n/2^(k+1))-psi^brv[2^k+1]), f mod (x^(n/2^(k+1))+psi^brv[2^k+1])
-  // where brv maps a log(n)-bit number to its bitreversal.
+  // For any polynomial f(X) in R_q = Z[X]/(q, X^n+1) for n a power of two and q
+  // a prime modulus such that q == 1 (mod 2n), the NTT form of f(X) is the
+  // vector
+  //   NTT(f) = (f(psi), f(psi^3), .., f(psi^(n/2-1))),
+  // where psi is a primitive 2n-th root of unity modulo q. By Chinese Remainder
+  // Theorem, the map f -> NTT(f) is an isomorphism between R_q and Z_q^n, and
+  // it can be computed using FFT (in bit reversed order).
+  // For details see dft_transformations.h.
   static Polynomial ConvertToNtt(std::vector<ModularInt> poly_coeffs,
                                  const NttParameters<ModularInt>* ntt_params,
                                  const ModularIntParams* modular_params) {
-    // Check to ensure that the coefficient vector is of the correct length.
-    int len = poly_coeffs.size();
-    if (len <= 0 || (len & (len - 1)) != 0) {
+    if (!ForwardNumberTheoreticTransform(poly_coeffs, *ntt_params,
+                                         *modular_params)
+             .ok()) {
       // An error value.
       return Polynomial();
     }
-
-    Polynomial output(std::move(poly_coeffs));
-    output.IterativeCooleyTukey(ntt_params->psis_bitrev_constant,
-                                modular_params);
-
-    return output;
+    return Polynomial(std::move(poly_coeffs));
   }
 
   // Deprecated ConvertToNtt function taking NttParameters by constant reference
@@ -108,14 +90,7 @@ class Polynomial {
   // the NTT representation. For instance, using the same notation as above,
   //    f'_i + f''_i = 2f_i and  psi^(-n/2)*(f'_i-f''_i) = 2c_(n/2+i).
   //
-  // In particular, the butterfly operation differs from the Cooley-Tukey
-  // butterfly used during the forward transform in that addition and
-  // substraction come before multiplying with a power of the root of unity.
-  // This butterfly operation is called the Gentleman-Sande butterfly.
-  //
-  // At the end of the computation, a normalization step by the inverse of
-  // n=2^log(n) (the factor 2 obtained at each level of the butterfly) is
-  // required.
+  // For details see dft_transformations.h.
   //
   // Returns a copy of the polynomial on errors.
   std::vector<ModularInt> InverseNtt(
@@ -126,20 +101,14 @@ class Polynomial {
       return coeffs_;
     }
 
-    Polynomial copy(*this);
-
-    if (!copy.IterativeGentlemanSande(ntt_params->psis_inv_bitrev_constant,
-                                      modular_params)
+    std::vector<ModularInt> coeffs_copy = coeffs_;
+    if (!InverseNumberTheoreticTransform(coeffs_copy, *ntt_params,
+                                         *modular_params)
              .ok()) {
       return coeffs_;
     }
 
-    // Normalize the result by multiplying by the inverse of n.
-    for (auto& coeff : copy.coeffs_) {
-      coeff.MulInPlace(ntt_params->n_inv_ptr.value(), modular_params);
-    }
-
-    return copy.coeffs_;
+    return coeffs_copy;
   }
 
   // Deprecated InverseNtt function taking NttParameters by constant reference
@@ -304,6 +273,7 @@ class Polynomial {
   }
   bool operator!=(const Polynomial& that) const { return !(*this == that); }
 
+  int LogLen() const { return log_len_; }
   int Len() const { return coeffs_.size(); }
 
   // Accessor for coefficients.
@@ -373,93 +343,6 @@ class Polynomial {
   }
 
  private:
-  // Helper function: Perform iterations of the Cooley-Tukey butterfly.
-  void IterativeCooleyTukey(
-      const std::vector<
-          std::tuple<typename ModularInt::Int, typename ModularInt::Int>>&
-          psis_bitrev_constant,
-      const ModularIntParams* modular_params) {
-    int index_psi = 1;
-    for (int i = static_cast<int>(log_len_) - 1; i >= 0; i--) {
-      // Layer i.
-      const int half_m = 1 << i;
-      const int m = half_m << 1;
-      for (int k = 0; k < Len(); k += m) {
-        const auto& [psi_constant, psi_constant_barrett] =
-            psis_bitrev_constant[index_psi];
-        for (int j = 0; j < half_m; j++) {
-          // The Cooley-Tukey butterfly operation.
-          const ModularInt t = coeffs_[k + j + half_m].MulConstant(
-              psi_constant, psi_constant_barrett, modular_params);
-          ModularInt u = coeffs_[k + j];
-          // Every odd layer, we perform *lazy operations* (i.e., we do not
-          // reduce in [0, modulus] but keeps the result of the operations in
-          // [0, 2*modulus]). At the beginning of the even layers, the input
-          // will therefore be in [0, 2*modulus] and therefore after applying
-          // addition or subtraction, the result will be in [0, 4*modulus].
-          // Since 4*modulus fits in a Int, this enables the computation to
-          // remains correct: we hence perform the regular modular addition and
-          // subtraction which reduce the values to [0, modulus] at the end of
-          // the even layers.
-          if (i & 1) {
-            coeffs_[k + j].LazyAddInPlace(t, modular_params);
-            // Note that the variable t is reduced in [0, modulus], which is
-            // required by the LazySubInPlace function.
-            coeffs_[k + j + half_m] =
-                std::move(u.LazySubInPlace(t, modular_params));
-          } else {
-            coeffs_[k + j].AddInPlace(t, modular_params);
-            // Note that the variable t is reduced in [0, modulus], which is
-            // required by the SubInPlace function.
-            coeffs_[k + j + half_m] =
-                std::move(u.SubInPlace(t, modular_params));
-          }
-        }
-        index_psi++;
-      }
-    }
-  }
-
-  // Helper function: Perform iterations of the Gentleman-Sande butterfly.
-  absl::Status IterativeGentlemanSande(
-      const std::vector<
-          std::tuple<typename ModularInt::Int, typename ModularInt::Int>>&
-          psis_inv_bitrev_constant,
-      const ModularIntParams* modular_params) {
-    int index_psi_inv = 0;
-    for (int i = 0; i < static_cast<int>(log_len_); i++) {
-      const int half_m = 1 << i;
-      const int m = half_m << 1;
-      for (int k = 0; k < Len(); k += m) {
-        if (index_psi_inv >= psis_inv_bitrev_constant.size()) {
-          return absl::InvalidArgumentError("Not enough psis provided.");
-        }
-        const auto& [psi_inv_constant, psi_inv_constant_barrett] =
-            psis_inv_bitrev_constant[index_psi_inv];
-        for (int j = 0; j < half_m; j++) {
-          // The Gentleman-Sande butterfly operation.
-          if (k + j + half_m >= coeffs_.size()) {
-            return absl::InvalidArgumentError(
-                "Polynomial too short for applying iterative Gentleman-Sande.");
-          }
-          const ModularInt t = coeffs_[k + j + half_m];
-          ModularInt u = coeffs_[k + j];
-          coeffs_[k + j].AddInPlace(t, modular_params);
-          // Since the input to MulConstantInPlace can be in [0, 2*modulus], we
-          // only perform a lazy subtraction.
-          coeffs_[k + j + half_m] =
-              std::move(u.LazySubInPlace(t, modular_params)
-                            .MulConstantInPlace(psi_inv_constant,
-                                                psi_inv_constant_barrett,
-                                                modular_params));
-        }
-        index_psi_inv++;
-      }
-    }
-
-    return absl::OkStatus();
-  }
-
   // Instance variables.
   size_t log_len_;
   std::vector<ModularInt> coeffs_;

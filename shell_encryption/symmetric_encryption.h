@@ -78,7 +78,6 @@ class SymmetricRlweCiphertext {
         error_params_(error_params),
         power_of_s_(1),
         error_(0) {}
-  SymmetricRlweCiphertext(const SymmetricRlweCiphertext& that) = default;
 
   // Create a ciphertext by supplying the vector of components.
   explicit SymmetricRlweCiphertext(std::vector<Polynomial<ModularInt>> c,
@@ -407,7 +406,7 @@ class SymmetricRlweCiphertext {
   // the same as in the homomorphic absorb operation above (the other overload
   // of the * operator).
   rlwe::StatusOr<SymmetricRlweCiphertext> operator*(
-      const SymmetricRlweCiphertext& that) {
+      const SymmetricRlweCiphertext& that) const {
     if (power_of_s_ != that.power_of_s_) {
       return absl::InvalidArgumentError(
           "Ciphertexts must be encrypted with the same key power.");
@@ -761,6 +760,9 @@ class SymmetricRlweKey {
 
   // Accessors.
   unsigned int Len() const { return key_.Len(); }
+  // b/278777783: These accessors should return const references since they are
+  // not supposed to be null. We should also add null checks for ntt_params_ in
+  // initialization.
   const NttParameters<ModularInt>* NttParams() const { return ntt_params_; }
   const typename ModularInt::Params* ModulusParams() const {
     return modulus_params_;

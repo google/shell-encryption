@@ -18,6 +18,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <iostream>
+#include <memory>
 #include <random>
 #include <vector>
 
@@ -49,6 +50,11 @@ const Uint64 kVariance = 4;
 const Uint64 kLogCoeffs = 7;
 const Uint64 kCoeffs = 1 << kLogCoeffs;
 
+// The following constants are for the tests where the server is created using
+// a smaller RLWE parameter than the ciphertexts in request
+const Uint64 kLogCoeffsMismatchedServer = 6;
+const Uint64 kCoeffsMismatchedServer = 1 << kLogCoeffsMismatchedServer;
+
 const Uint64 kTotalSize =
     kCoeffs + 3;  // Test vectors larger than the number of coefficients.
 const Uint64 kNumberIndices = kTotalSize / 2;  // The number of indices set to 1
@@ -70,18 +76,18 @@ class ObliviousExpandTest : public ::testing::TestWithParam<PrngType> {
     ASSERT_OK_AND_ASSIGN(auto ntt_params, InitializeNttParameters<uint_m>(
                                               kLogCoeffs, params59_.get()));
     ntt_params_ =
-        absl::make_unique<const NttParameters<uint_m>>(std::move(ntt_params));
+        std::make_unique<const NttParameters<uint_m>>(std::move(ntt_params));
     ASSERT_OK_AND_ASSIGN(
         auto error_params,
         ErrorParams<uint_m>::Create(kLogT, kVariance, params59_.get(),
                                     ntt_params_.get()));
-    error_params_ = absl::make_unique<const ErrorParams<uint_m>>(error_params);
+    error_params_ = std::make_unique<const ErrorParams<uint_m>>(error_params);
     ASSERT_OK_AND_ASSIGN(std::string prng_seed, GenerateSeed());
     ASSERT_OK_AND_ASSIGN(auto prng, CreatePrng(prng_seed));
     ASSERT_OK_AND_ASSIGN(
         auto key, Key::Sample(kLogCoeffs, kVariance, kLogT, params59_.get(),
                               ntt_params_.get(), prng.get()));
-    key_ = absl::make_unique<Key>(std::move(key));
+    key_ = std::make_unique<Key>(std::move(key));
     for (int i = 0; i < kLogCoeffs; i++) {
       ASSERT_OK_AND_ASSIGN(
           auto galois_key,
@@ -360,6 +366,46 @@ TEST_P(ObliviousExpandTest,
                        HasSubstr(absl::StrCat(
                            "be due to using levels_of_expand = ", kLogCoeffs,
                            " when generating the ObliviousExpander."))));
+}
+
+TEST_P(ObliviousExpandTest,
+       ObliviousExpandWithKeyGeneratorOnMismatchedServerParams) {
+  // ObliviousExpand should return an error if the ciphertexts in request use a
+  // different RLWE parameter than the server
+  unsigned int log_compression_factor = kLogCoeffs;
+
+  // Create the galois generator using a normal RLWE degree
+  ASSERT_OK_AND_ASSIGN(
+      auto generator,
+      GaloisKey<uint_m>::Create(
+          *key_, prng_type_,
+          GaloisGeneratorObliviousExpander<uint_m>::GetSubstitutionGenerator(),
+          10));
+
+  // Create the server expander using a smaller RLWE degree
+  ASSERT_OK_AND_ASSIGN(auto ntt_params_server,
+                       InitializeNttParameters<uint_m>(
+                           kLogCoeffsMismatchedServer, params59_.get()));
+  ASSERT_OK_AND_ASSIGN(
+      auto expander,
+      GaloisGeneratorObliviousExpander<uint_m>::Create(
+          generator, kLogT, params59_.get(), &ntt_params_server));
+
+  std::vector<int> indices = SampleRandomIndices();
+
+  // Create the compressed encryptions using the normal RLWE degree.
+  ASSERT_OK_AND_ASSIGN(
+      auto encryptions,
+      CompressAndEncryptVector(kTotalSize, indices, log_compression_factor));
+
+  // Since the encryptions and the expander are using different RLWE degrees,
+  // an invalid argument error is expected
+  EXPECT_THAT(expander->ObliviousExpand(encryptions, log_compression_factor,
+                                        kTotalSize),
+              StatusIs(::absl::StatusCode::kInvalidArgument,
+                       HasSubstr(absl::StrCat(
+                           "Ciphertext in request must have ",
+                           kCoeffsMismatchedServer, " coefficients"))));
 }
 
 TEST_P(ObliviousExpandTest, DefaultObliviousExpand) {
