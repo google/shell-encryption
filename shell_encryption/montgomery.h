@@ -28,8 +28,6 @@
 #include "absl/numeric/int128.h"
 #include "absl/strings/str_cat.h"
 #include "shell_encryption/bits_util.h"
-
-
 #include "shell_encryption/constants.h"
 #include "shell_encryption/int256.h"
 #include "shell_encryption/prng/prng.h"
@@ -77,8 +75,7 @@ struct BigInt<unsigned __int128> {
 // The parameters necessary for a Montgomery integer. Note that the template
 // parameters ensure that T is an unsigned integral of at least 8 bits.
 template <typename T>
-struct
-    MontgomeryIntParams {
+struct MontgomeryIntParams {
   // Expose Int and its greater type. BigInt is required in order to multiply
   // two Int and ensure that no overflow occurs.
   //
@@ -200,7 +197,7 @@ struct
   // modulus must be odd.
   // Returns a tuple of (inv_r, inv_modulus) such that:
   //     r * inv_r - modulus * inv_modulus = 1
-  static  std::tuple<Int, Int> Inverses(
+  static std::tuple<Int, Int> Inverses(
       BigInt modulus_bigint, BigInt r);
 };
 
@@ -227,8 +224,7 @@ MontgomeryIntParams<unsigned __int128>::BarrettReduceBigInt(
 // The underlying integer type T must be unsigned and must not be bool.
 // This class is thread safe.
 template <typename T>
-class
-    ABSL_MUST_USE_RESULT MontgomeryInt {
+class ABSL_MUST_USE_RESULT MontgomeryInt {
  public:
   // Expose Int and its greater type. BigInt is required in order to multiply
   // two Int and ensure that no overflow occurs. This should also be used by
@@ -242,7 +238,7 @@ class
   // Static factory that converts a non-Montgomery representation integer, the
   // underlying integer type, into a Montgomery representation integer. Does not
   // take ownership of params. i.e., import "a".
-  static  rlwe::StatusOr<MontgomeryInt> ImportInt(
+  static rlwe::StatusOr<MontgomeryInt> ImportInt(
       Int n, const Params* params);
 
   // Construction given `n` in Montgomery representation. If the input in not in
@@ -250,13 +246,13 @@ class
   explicit MontgomeryInt(Int n) : n_(n) {}
 
   // Static functions to create a MontgomeryInt of 0 and 1.
-  static  MontgomeryInt ImportZero(const Params* params);
-  static  MontgomeryInt ImportOne(const Params* params);
+  static MontgomeryInt ImportZero(const Params* params);
+  static MontgomeryInt ImportOne(const Params* params);
 
   // Import a random integer using entropy from specified prng. Does not take
   // ownership of params or prng.
   template <typename Prng = rlwe::SecurePrng>
-  static  rlwe::StatusOr<MontgomeryInt> ImportRandom(
+  static rlwe::StatusOr<MontgomeryInt> ImportRandom(
       Prng* prng, const Params* params) {
     // In order to generate unbiased randomness, we uniformly and randomly
     // sample integers in [0, 2^params->log_modulus) until the generated integer
@@ -270,7 +266,7 @@ class
     return MontgomeryInt(random_int);
   }
 
-  static  BigInt DivAndTruncate(BigInt dividend,
+  static BigInt DivAndTruncate(BigInt dividend,
                                                        BigInt divisor);
 
   // No default constructor.
@@ -292,13 +288,13 @@ class
 
   // Serialization.
   rlwe::StatusOr<std::string> Serialize(const Params* params) const;
-  static  rlwe::StatusOr<std::string> SerializeVector(
+  static rlwe::StatusOr<std::string> SerializeVector(
       const std::vector<MontgomeryInt>& coeffs, const Params* params);
 
   // Deserialization.
-  static  rlwe::StatusOr<MontgomeryInt> Deserialize(
+  static rlwe::StatusOr<MontgomeryInt> Deserialize(
       absl::string_view payload, const Params* params);
-  static  rlwe::StatusOr<std::vector<MontgomeryInt>>
+  static rlwe::StatusOr<std::vector<MontgomeryInt>>
   DeserializeVector(int num_coeffs, absl::string_view serialized,
                     const Params* params);
 
@@ -510,7 +506,7 @@ class
   // size.
 
   // Batch addition of two vectors.
-  static  rlwe::StatusOr<std::vector<MontgomeryInt>>
+  static rlwe::StatusOr<std::vector<MontgomeryInt>>
   BatchAdd(const std::vector<MontgomeryInt>& in1,
            const std::vector<MontgomeryInt>& in2, const Params* params);
   static absl::Status BatchAddInPlace(std::vector<MontgomeryInt>* in1,
@@ -518,7 +514,7 @@ class
                                       const Params* params);
 
   // Batch addition of one vector with a scalar.
-  static  rlwe::StatusOr<std::vector<MontgomeryInt>>
+  static rlwe::StatusOr<std::vector<MontgomeryInt>>
   BatchAdd(const std::vector<MontgomeryInt>& in1, const MontgomeryInt& in2,
            const Params* params);
   static absl::Status BatchAddInPlace(std::vector<MontgomeryInt>* in1,
@@ -526,73 +522,73 @@ class
                                       const Params* params);
 
   // Batch subtraction of two vectors.
-  static  rlwe::StatusOr<std::vector<MontgomeryInt>>
+  static rlwe::StatusOr<std::vector<MontgomeryInt>>
   BatchSub(const std::vector<MontgomeryInt>& in1,
            const std::vector<MontgomeryInt>& in2, const Params* params);
-  static  absl::Status BatchSubInPlace(
+  static absl::Status BatchSubInPlace(
       std::vector<MontgomeryInt>* in1, const std::vector<MontgomeryInt>& in2,
       const Params* params);
 
   // Batch subtraction of one vector with a scalar.
-  static  rlwe::StatusOr<std::vector<MontgomeryInt>>
+  static rlwe::StatusOr<std::vector<MontgomeryInt>>
   BatchSub(const std::vector<MontgomeryInt>& in1, const MontgomeryInt& in2,
            const Params* params);
-  static  absl::Status BatchSubInPlace(
+  static absl::Status BatchSubInPlace(
       std::vector<MontgomeryInt>* in1, const MontgomeryInt& in2,
       const Params* params);
 
   // Batch multiplication of two vectors.
-  static  rlwe::StatusOr<std::vector<MontgomeryInt>>
+  static rlwe::StatusOr<std::vector<MontgomeryInt>>
   BatchMul(const std::vector<MontgomeryInt>& in1,
            const std::vector<MontgomeryInt>& in2, const Params* params);
-  static  absl::Status BatchMulInPlace(
+  static absl::Status BatchMulInPlace(
       std::vector<MontgomeryInt>* in1, const std::vector<MontgomeryInt>& in2,
       const Params* params);
 
   // Batch fused multiply add of two vectors.
-  static  rlwe::StatusOr<std::vector<MontgomeryInt>>
+  static rlwe::StatusOr<std::vector<MontgomeryInt>>
   BatchFusedMulAdd(const std::vector<MontgomeryInt>& in1,
                    const std::vector<MontgomeryInt>& in2,
                    const std::vector<MontgomeryInt>& in3, const Params* params);
-  static  absl::Status BatchFusedMulAddInPlace(
+  static absl::Status BatchFusedMulAddInPlace(
       std::vector<MontgomeryInt>* in1, const std::vector<MontgomeryInt>& in2,
       const std::vector<MontgomeryInt>& in3, const Params* params);
 
   // Batch fused multiply add of two vectors, one being constant.
-  static  rlwe::StatusOr<std::vector<MontgomeryInt>>
+  static rlwe::StatusOr<std::vector<MontgomeryInt>>
   BatchFusedMulConstantAdd(const std::vector<MontgomeryInt>& in1,
                            const std::vector<MontgomeryInt>& in2,
                            const std::vector<Int>& constant,
                            const std::vector<Int>& constant_barrett,
                            const Params* params);
-  static  absl::Status BatchFusedMulConstantAddInPlace(
+  static absl::Status BatchFusedMulConstantAddInPlace(
       std::vector<MontgomeryInt>* in1, const std::vector<MontgomeryInt>& in2,
       const std::vector<Int>& constant,
       const std::vector<Int>& constant_barrett, const Params* params);
 
   // Batch multiplication of two vectors, where the second vector is a constant.
-  static  rlwe::StatusOr<std::vector<MontgomeryInt>>
+  static rlwe::StatusOr<std::vector<MontgomeryInt>>
   BatchMulConstant(const std::vector<MontgomeryInt>& in1,
                    const std::vector<Int>& in2_constant,
                    const std::vector<Int>& in2_constant_barrett,
                    const Params* params);
-  static  absl::Status BatchMulConstantInPlace(
+  static absl::Status BatchMulConstantInPlace(
       std::vector<MontgomeryInt>* in1, const std::vector<Int>& in2_constant,
       const std::vector<Int>& in2_constant_barrett, const Params* params);
 
   // Batch multiplication of a vector with a scalar.
-  static  rlwe::StatusOr<std::vector<MontgomeryInt>>
+  static rlwe::StatusOr<std::vector<MontgomeryInt>>
   BatchMul(const std::vector<MontgomeryInt>& in1, const MontgomeryInt& in2,
            const Params* params);
-  static  absl::Status BatchMulInPlace(
+  static absl::Status BatchMulInPlace(
       std::vector<MontgomeryInt>* in1, const MontgomeryInt& in2,
       const Params* params);
 
   // Batch multiplication of a vector with a constant scalar.
-  static  rlwe::StatusOr<std::vector<MontgomeryInt>>
+  static rlwe::StatusOr<std::vector<MontgomeryInt>>
   BatchMulConstant(const std::vector<MontgomeryInt>& in1, const Int& constant,
                    const Int& constant_barrett, const Params* params);
-  static  absl::Status BatchMulConstantInPlace(
+  static absl::Status BatchMulConstantInPlace(
       std::vector<MontgomeryInt>* in1, const Int& constant,
       const Int& constant_barrett, const Params* params);
 
@@ -601,16 +597,16 @@ class
   bool operator!=(const MontgomeryInt& that) const { return !(*this == that); }
 
   // Modular exponentiation.
-   MontgomeryInt ModExp(Int exponent,
+  MontgomeryInt ModExp(Int exponent,
                                                const Params* params) const;
 
   // Inverse.
-   MontgomeryInt
+  MontgomeryInt
   MultiplicativeInverse(const Params* params) const;
 
  private:
   template <typename Prng = rlwe::SecurePrng>
-  static  rlwe::StatusOr<Int> GenerateRandomInt(
+  static rlwe::StatusOr<Int> GenerateRandomInt(
       int log_modulus, Prng* prng) {
     // Generate a random Int. As the modulus is always smaller than max(Int),
     // there will be no issues with overflow.

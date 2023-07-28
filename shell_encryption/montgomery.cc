@@ -14,8 +14,6 @@
 
 #include "shell_encryption/montgomery.h"
 
-
-
 #include "shell_encryption/transcription.h"
 
 namespace rlwe {
@@ -474,27 +472,17 @@ MontgomeryInt<T> MontgomeryInt<T>::MultiplicativeInverse(
 
 // Instantiations of MontgomeryInt and MontgomeryIntParams with specific
 // integral types.
-template struct
-    MontgomeryIntParams<Uint16>;
-template struct
-    MontgomeryIntParams<Uint32>;
-template struct
-    MontgomeryIntParams<Uint64>;
-template struct
-    MontgomeryIntParams<absl::uint128>;
-template class
-    MontgomeryInt<Uint16>;
-template class
-    MontgomeryInt<Uint32>;
-template class
-    MontgomeryInt<Uint64>;
-template class
-    MontgomeryInt<absl::uint128>;
+template struct MontgomeryIntParams<Uint16>;
+template struct MontgomeryIntParams<Uint32>;
+template struct MontgomeryIntParams<Uint64>;
+template struct MontgomeryIntParams<absl::uint128>;
+template class MontgomeryInt<Uint16>;
+template class MontgomeryInt<Uint32>;
+template class MontgomeryInt<Uint64>;
+template class MontgomeryInt<absl::uint128>;
 
 #ifdef ABSL_HAVE_INTRINSIC_INT128
-template struct
-    MontgomeryIntParams<unsigned __int128>;
-template class
-    MontgomeryInt<unsigned __int128>;
+template struct MontgomeryIntParams<unsigned __int128>;
+template class MontgomeryInt<unsigned __int128>;
 #endif
 }  // namespace rlwe

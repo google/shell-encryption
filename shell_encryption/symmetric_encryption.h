@@ -760,9 +760,6 @@ class SymmetricRlweKey {
 
   // Accessors.
   unsigned int Len() const { return key_.Len(); }
-  // b/278777783: These accessors should return const references since they are
-  // not supposed to be null. We should also add null checks for ntt_params_ in
-  // initialization.
   const NttParameters<ModularInt>* NttParams() const { return ntt_params_; }
   const typename ModularInt::Params* ModulusParams() const {
     return modulus_params_;

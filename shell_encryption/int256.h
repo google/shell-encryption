@@ -16,7 +16,6 @@
 #ifndef RLWE_INT256_H_
 #define RLWE_INT256_H_
 
-
 #include "absl/numeric/int128.h"
 #include "shell_encryption/integral_types.h"
 
@@ -25,7 +24,7 @@ namespace rlwe {
 struct uint256_pod;
 
 // An unsigned 256-bit integer type. Thread-compatible.
-class  uint256 {
+class uint256 {
  public:
   constexpr uint256();
   constexpr uint256(absl::uint128 top, absl::uint128 bottom);
@@ -88,11 +87,11 @@ class  uint256 {
   uint256& operator-=(const uint256& b);
   uint256& operator*=(const uint256& b);
   // Long division/modulo for uint256.
-   uint256& operator/=(const uint256& divisor);
-   uint256& operator%=(const uint256& divisor);
+  uint256& operator/=(const uint256& divisor);
+  uint256& operator%=(const uint256& divisor);
   uint256 operator++(int);
   uint256 operator--(int);
-   uint256& operator<<=(int);
+  uint256& operator<<=(int);
   uint256& operator>>=(int);
   uint256& operator&=(const uint256& b);
   uint256& operator|=(const uint256& b);
@@ -108,7 +107,7 @@ class  uint256 {
 #endif
 
   // We add "std::" to avoid including all of port.h.
-  friend  std::ostream& operator<<(std::ostream& o, const uint256& b);
+  friend std::ostream& operator<<(std::ostream& o, const uint256& b);
 
  private:
   static void DivModImpl(uint256 dividend, uint256 divisor,
@@ -144,7 +143,7 @@ constexpr uint256 Uint256Max() {
 
 // This is a POD form of uint256 which can be used for static variables which
 // need to be operated on as uint256.
-struct  uint256_pod {
+struct uint256_pod {
   // Note: The ordering of fields is different than 'class uint256' but the
   // same as its 2-arg constructor.  This enables more obvious initialization
   // of static instances, which is the primary reason for this struct in the

@@ -19,8 +19,6 @@
 #include <cstdint>
 #include <vector>
 
-
-
 #include "shell_encryption/sample_error.h"
 #include "shell_encryption/statusor.h"
 #include "shell_encryption/symmetric_encryption.h"
@@ -67,8 +65,7 @@ namespace rlwe {
 // length (k - 1), where k is the number of parts of the ciphertext it applies
 // to.
 template <typename ModularInt>
-class
-    RelinearizationKey {
+class RelinearizationKey {
   using ModularIntParams = typename ModularInt::Params;
 
  public:
@@ -84,7 +81,7 @@ class
   // with (1, s(X^k)). In that case, we would use a relinearization key with
   // substition_power = k to return the ciphertext to be encrypted with (1,s).
   // See GaloisKey for an explicit wrapper around RelinearizationKey.
-  static  rlwe::StatusOr<RelinearizationKey> Create(
+  static rlwe::StatusOr<RelinearizationKey> Create(
       const SymmetricRlweKey<ModularInt>& key, PrngType prng_type,
       int num_parts, Uint64 log_decomposition_modulus,
       Uint64 substitution_power = 1);
@@ -227,8 +224,7 @@ extern template class RelinearizationKey<MontgomeryInt<Uint32>>;
 extern template class RelinearizationKey<MontgomeryInt<Uint64>>;
 extern template class RelinearizationKey<MontgomeryInt<absl::uint128>>;
 #ifdef ABSL_HAVE_INTRINSIC_INT128
-extern template class
-    RelinearizationKey<MontgomeryInt<unsigned __int128>>;
+extern template class RelinearizationKey<MontgomeryInt<unsigned __int128>>;
 #endif
 }  // namespace rlwe
 

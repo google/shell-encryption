@@ -23,7 +23,6 @@
 #include "absl/base/thread_annotations.h"
 #include "absl/strings/string_view.h"
 #include "absl/synchronization/mutex.h"
-
 #include "shell_encryption/prng/chacha_prng_util.h"
 #include "shell_encryption/prng/prng.h"
 #include "shell_encryption/statusor.h"
@@ -54,7 +53,7 @@ class ChaChaPrng : public SecurePrng {
   // errors.
   //
   // Thread safe.
-  static  rlwe::StatusOr<std::unique_ptr<ChaChaPrng>>
+  static rlwe::StatusOr<std::unique_ptr<ChaChaPrng>>
   Create(absl::string_view in_key);
 
   // Returns 8 bits of randomness.

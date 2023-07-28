@@ -23,8 +23,6 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 #include "absl/numeric/int128.h"
-
-
 #include "shell_encryption/constants.h"
 #include "shell_encryption/serialization.pb.h"
 #include "shell_encryption/status_macros.h"
@@ -83,8 +81,7 @@ inline unsigned __int128 GetIntMax<unsigned __int128>() {
 #endif
 
 template <typename T>
-class
-    MontgomeryTest : public ::testing::Test {};
+class MontgomeryTest : public ::testing::Test {};
 TYPED_TEST_SUITE(MontgomeryTest, testing::ModularIntTypes);
 
 TYPED_TEST(MontgomeryTest, ModulusTooLarge) {

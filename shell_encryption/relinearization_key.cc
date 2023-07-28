@@ -21,8 +21,6 @@
 #include "absl/numeric/int128.h"
 #include "absl/status/status.h"
 #include "shell_encryption/bits_util.h"
-
-
 #include "shell_encryption/montgomery.h"
 #include "shell_encryption/prng/prng.h"
 #include "shell_encryption/prng/single_thread_chacha_prng.h"
@@ -499,16 +497,11 @@ RelinearizationKey<ModularInt>::Deserialize(
 // Instantiations of RelinearizationKey with specific MontgomeryInt classes.
 // If any new types are added, montgomery.h should be updated accordingly (such
 // as ensuring BigInt is correctly specialized, etc.).
-template class
-    RelinearizationKey<MontgomeryInt<Uint16>>;
-template class
-    RelinearizationKey<MontgomeryInt<Uint32>>;
-template class
-    RelinearizationKey<MontgomeryInt<Uint64>>;
-template class
-    RelinearizationKey<MontgomeryInt<absl::uint128>>;
+template class RelinearizationKey<MontgomeryInt<Uint16>>;
+template class RelinearizationKey<MontgomeryInt<Uint32>>;
+template class RelinearizationKey<MontgomeryInt<Uint64>>;
+template class RelinearizationKey<MontgomeryInt<absl::uint128>>;
 #ifdef ABSL_HAVE_INTRINSIC_INT128
-template class
-    RelinearizationKey<MontgomeryInt<unsigned __int128>>;
+template class RelinearizationKey<MontgomeryInt<unsigned __int128>>;
 #endif
 }  //  namespace rlwe

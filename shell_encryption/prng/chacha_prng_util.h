@@ -25,7 +25,6 @@
 
 #include "absl/status/status.h"
 #include "absl/strings/string_view.h"
-
 #include "shell_encryption/integral_types.h"
 #include "shell_encryption/statusor.h"
 
@@ -38,24 +37,24 @@ const int kChaChaOutputBytes = 255 * 32;
 
 // Once pseudorandom output is exhausted, the salt is updated to construct
 // new pseudorandom output.
- absl::Status ChaChaPrngResalt(
+absl::Status ChaChaPrngResalt(
     absl::string_view key, int buffer_size, int* salt_counter,
     int* position_in_buffer, std::vector<Uint8>* buffer);
 
 // Generates a secure key for instantiating an CHACHA.
- rlwe::StatusOr<std::string> ChaChaPrngGenerateKey();
+rlwe::StatusOr<std::string> ChaChaPrngGenerateKey();
 
 // Returns 8 bits of randomness.
 //
 // Fails on internal cryptographic errors.
- rlwe::StatusOr<Uint8> ChaChaPrngRand8(
+rlwe::StatusOr<Uint8> ChaChaPrngRand8(
     absl::string_view key, int* position_in_buffer, int* salt_counter,
     std::vector<Uint8>* buffer);
 
 // Returns 64 bits of randomness.
 //
 // Fails on internal cryptographic errors.
- rlwe::StatusOr<Uint64> ChaChaPrngRand64(
+rlwe::StatusOr<Uint64> ChaChaPrngRand64(
     absl::string_view key, int* position_in_buffer, int* salt_counter,
     std::vector<Uint8>* buffer);
 

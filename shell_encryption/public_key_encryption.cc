@@ -221,17 +221,12 @@ PublicRlweKey<ModularInt>::Deserialize(
 // Instantiations of PublicRlweKey with specific MontgomeryInt classes.
 // If any new types are added, montgomery.h should be updated accordingly (such
 // as ensuring BigInt is correctly specialized, etc.).
-template class
-    PublicRlweKey<MontgomeryInt<Uint16>>;
-template class
-    PublicRlweKey<MontgomeryInt<Uint32>>;
-template class
-    PublicRlweKey<MontgomeryInt<Uint64>>;
-template class
-    PublicRlweKey<MontgomeryInt<absl::uint128>>;
+template class PublicRlweKey<MontgomeryInt<Uint16>>;
+template class PublicRlweKey<MontgomeryInt<Uint32>>;
+template class PublicRlweKey<MontgomeryInt<Uint64>>;
+template class PublicRlweKey<MontgomeryInt<absl::uint128>>;
 #ifdef ABSL_HAVE_INTRINSIC_INT128
-template class
-    PublicRlweKey<MontgomeryInt<unsigned __int128>>;
+template class PublicRlweKey<MontgomeryInt<unsigned __int128>>;
 #endif
 
 }  // namespace rlwe
