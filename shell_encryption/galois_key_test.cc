@@ -15,6 +15,7 @@
 
 #include "shell_encryption/galois_key.h"
 
+#include <memory>
 #include <random>
 
 #include <gmock/gmock.h>
@@ -62,7 +63,7 @@ class GaloisKeyTest : public ::testing::TestWithParam<rlwe::PrngType> {
     ASSERT_OK_AND_ASSIGN(auto ntt_params,
                          rlwe::InitializeNttParameters<uint_m>(
                              rlwe::testing::kLogCoeffs, params59_.get()));
-    ntt_params_ = absl::make_unique<const rlwe::NttParameters<uint_m>>(
+    ntt_params_ = std::make_unique<const rlwe::NttParameters<uint_m>>(
         std::move(ntt_params));
     ASSERT_OK_AND_ASSIGN(
         auto error_params,
@@ -70,7 +71,7 @@ class GaloisKeyTest : public ::testing::TestWithParam<rlwe::PrngType> {
                                           rlwe::testing::kDefaultVariance,
                                           params59_.get(), ntt_params_.get()));
     error_params_ =
-        absl::make_unique<const rlwe::ErrorParams<uint_m>>(error_params);
+        std::make_unique<const rlwe::ErrorParams<uint_m>>(error_params);
 
     prng_type_ = GetParam();
   }

@@ -12,10 +12,17 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+load("@rules_license//rules:license.bzl", "license")
 load("@rules_cc//cc:defs.bzl", "cc_library")
 load("@rules_proto//proto:defs.bzl", "proto_library")
 
 package(default_visibility = ["//visibility:public"])
+
+license(
+    name = "package_license",
+    package_name = "rlwe",
+    license_kinds = ["@rules_license//licenses/spdx:Apache-2.0"],
+)
 
 licenses(["notice"])
 
@@ -237,6 +244,39 @@ cc_test(
     ],
 )
 
+# Discrete Fourier transformations.
+
+cc_library(
+    name = "dft_transformations",
+    hdrs = ["dft_transformations.h"],
+    deps = [
+        ":ntt_parameters",
+        ":statusor_fork",
+        "@com_google_absl//absl/status",
+    ],
+)
+
+cc_test(
+    name = "dft_transformations_test",
+    size = "small",
+    srcs = [
+        "dft_transformations_test.cc",
+    ],
+    deps = [
+        ":context",
+        ":dft_transformations",
+        ":montgomery",
+        ":ntt_parameters",
+        ":statusor_fork",
+        "//shell_encryption/testing:parameters",
+        "//shell_encryption/testing:status_is_fork",
+        "//shell_encryption/testing:status_testing",
+        "//shell_encryption/testing:testing_prng",
+        "@com_github_google_googletest//:gtest_main",
+        "@com_google_absl//absl/numeric:int128",
+    ],
+)
+
 # NTT polynomial.
 
 cc_library(
@@ -244,14 +284,15 @@ cc_library(
     hdrs = ["polynomial.h"],
     deps = [
         ":constants",
+        ":dft_transformations",
         ":ntt_parameters",
         ":serialization_cc_proto",
         ":statusor_fork",
         "//shell_encryption/opt:constant_polynomial",
         "//shell_encryption/prng",
-        "@com_google_absl//absl/strings:str_format",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/strings:str_format",
     ],
 )
 
@@ -313,7 +354,7 @@ cc_test(
     ],
 )
 
-# Encryption.
+# Symmetric Encryption.
 
 cc_library(
     name = "symmetric_encryption",
@@ -384,6 +425,54 @@ cc_test(
         "//shell_encryption/testing:status_testing",
         "//shell_encryption/testing:testing_utils",
         "@com_github_google_googletest//:gtest_main",
+    ],
+)
+
+# Public Key Encryption
+
+cc_library(
+    name = "public_key_encryption",
+    srcs = ["public_key_encryption.cc"],
+    hdrs = ["public_key_encryption.h"],
+    deps = [
+        ":error_params",
+        ":montgomery",
+        ":polynomial",
+        ":sample_error",
+        ":serialization_cc_proto",
+        ":statusor_fork",
+        ":symmetric_encryption",
+        "//shell_encryption/prng",
+        "//shell_encryption/prng:single_thread_chacha_prng",
+        "//shell_encryption/prng:single_thread_hkdf_prng",
+        "@com_google_absl//absl/numeric:int128",
+        "@com_google_absl//absl/status",
+    ],
+)
+
+cc_test(
+    name = "public_key_encryption_test",
+    size = "medium",
+    srcs = [
+        "public_key_encryption_test.cc",
+    ],
+    deps = [
+        ":constants",
+        ":context",
+        ":montgomery",
+        ":ntt_parameters",
+        ":polynomial",
+        ":public_key_encryption",
+        ":serialization_cc_proto",
+        ":statusor_fork",
+        ":symmetric_encryption",
+        "//shell_encryption/testing:parameters",
+        "//shell_encryption/testing:status_is_fork",
+        "//shell_encryption/testing:status_testing",
+        "//shell_encryption/testing:testing_prng",
+        "//shell_encryption/testing:testing_utils",
+        "@com_github_google_googletest//:gtest_main",
+        "@com_google_absl//absl/status",
     ],
 )
 
@@ -465,6 +554,105 @@ cc_test(
         "//shell_encryption/testing:testing_prng",
         "//shell_encryption/testing:testing_utils",
         "@com_github_google_googletest//:gtest_main",
+    ],
+)
+
+# Utilities to convert between different modulus representations.
+cc_library(
+    name = "modulus_conversion",
+    hdrs = ["modulus_conversion.h"],
+    deps = [
+        ":montgomery",
+        ":ntt_parameters",
+        ":polynomial",
+        ":statusor_fork",
+        "@com_google_absl//absl/types:span",
+    ],
+)
+
+# Relinearization key using the auxiliary modulus technique
+cc_library(
+    name = "aux_relinearization_key",
+    srcs = ["aux_relinearization_key.cc"],
+    hdrs = ["aux_relinearization_key.h"],
+    deps = [
+        ":modulus_conversion",
+        ":montgomery",
+        ":ntt_parameters",
+        ":polynomial",
+        ":serialization_cc_proto",
+        ":statusor_fork",
+        ":symmetric_encryption",
+        "//shell_encryption/prng",
+        "//shell_encryption/prng:single_thread_chacha_prng",
+        "//shell_encryption/prng:single_thread_hkdf_prng",
+        "@com_google_absl//absl/memory",
+        "@com_google_absl//absl/numeric:int128",
+        "@com_google_absl//absl/status",
+    ],
+)
+
+cc_test(
+    name = "aux_relinearization_key_test",
+    size = "small",
+    srcs = ["aux_relinearization_key_test.cc"],
+    deps = [
+        ":aux_relinearization_key",
+        ":constants",
+        ":integral_types",
+        ":montgomery",
+        ":ntt_parameters",
+        ":polynomial",
+        ":serialization_cc_proto",
+        ":statusor_fork",
+        ":symmetric_encryption",
+        "//shell_encryption/prng:chacha_prng",
+        "//shell_encryption/prng:hkdf_prng",
+        "//shell_encryption/prng:single_thread_chacha_prng",
+        "//shell_encryption/prng:single_thread_hkdf_prng",
+        "//shell_encryption/testing:status_is_fork",
+        "//shell_encryption/testing:status_testing",
+        "//shell_encryption/testing:testing_prng",
+        "//shell_encryption/testing:testing_utils",
+        "@com_github_google_googletest//:gtest_main",
+        "@com_google_absl//absl/status",
+    ],
+)
+
+# Galois key using the auxiliary modulus technique
+cc_library(
+    name = "aux_galois_key",
+    hdrs = ["aux_galois_key.h"],
+    deps = [
+        ":aux_relinearization_key",
+        ":montgomery",
+        ":ntt_parameters",
+        ":polynomial",
+        ":serialization_cc_proto",
+        ":statusor_fork",
+        ":symmetric_encryption",
+        "//shell_encryption/prng",
+    ],
+)
+
+cc_test(
+    name = "aux_galois_key_test",
+    size = "small",
+    srcs = ["aux_galois_key_test.cc"],
+    deps = [
+        ":aux_galois_key",
+        ":constants",
+        ":montgomery",
+        ":ntt_parameters",
+        ":polynomial",
+        ":serialization_cc_proto",
+        ":statusor_fork",
+        ":symmetric_encryption",
+        "//shell_encryption/testing:status_is_fork",
+        "//shell_encryption/testing:status_testing",
+        "//shell_encryption/testing:testing_utils",
+        "@com_github_google_googletest//:gtest_main",
+        "@com_google_absl//absl/status",
     ],
 )
 

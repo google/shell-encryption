@@ -110,6 +110,11 @@ class GaloisKey {
   RelinearizationKey<ModularInt> relinearization_key_;
 };
 
+template class GaloisKey<rlwe::MontgomeryInt<Uint16>>;
+template class GaloisKey<rlwe::MontgomeryInt<Uint32>>;
+template class GaloisKey<rlwe::MontgomeryInt<Uint64>>;
+template class GaloisKey<rlwe::MontgomeryInt<absl::uint128>>;
+
 }  //  namespace rlwe
 
 #endif  // RLWE_GALOIS_KEY_H_

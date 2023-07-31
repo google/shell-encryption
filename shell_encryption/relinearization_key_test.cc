@@ -15,6 +15,7 @@
 
 #include "shell_encryption/relinearization_key.h"
 
+#include <memory>
 #include <random>
 
 #include <gmock/gmock.h>
@@ -73,20 +74,20 @@ class RelinearizationKeyTest : public ::testing::TestWithParam<rlwe::PrngType> {
     ASSERT_OK_AND_ASSIGN(
         auto ntt_params80,
         rlwe::InitializeNttParameters<uint_m>(kLogCoeffs, params80_.get()));
-    ntt_params_ = absl::make_unique<const rlwe::NttParameters<uint_m>>(
+    ntt_params_ = std::make_unique<const rlwe::NttParameters<uint_m>>(
         std::move(ntt_params));
-    ntt_params80_ = absl::make_unique<const rlwe::NttParameters<uint_m>>(
+    ntt_params80_ = std::make_unique<const rlwe::NttParameters<uint_m>>(
         std::move(ntt_params80));
     ASSERT_OK_AND_ASSIGN(auto error_params,
                          rlwe::ErrorParams<uint_m>::Create(
                              kLogPlaintextModulus, kDefaultVariance,
                              params14_.get(), ntt_params_.get()));
-    error_params_ = absl::make_unique<const ErrorParams>(error_params);
+    error_params_ = std::make_unique<const ErrorParams>(error_params);
     ASSERT_OK_AND_ASSIGN(auto error_params80,
                          rlwe::ErrorParams<uint_m>::Create(
                              kLogPlaintextModulus, kDefaultVariance,
                              params80_.get(), ntt_params80_.get()));
-    error_params80_ = absl::make_unique<const ErrorParams>(error_params80);
+    error_params80_ = std::make_unique<const ErrorParams>(error_params80);
 
     prng_type_ = GetParam();
   }
@@ -412,11 +413,13 @@ TEST_P(RelinearizationKeyTest, RepeatedRelinearizationDecrypts) {
 TEST_P(RelinearizationKeyTest, CiphertextWithTooManyComponents) {
   ASSERT_OK_AND_ASSIGN(auto key, SampleKey());
 
-  // RelinearizationKey has length 2.
+  // Create a RelinearizationKey for ciphertexts of length 2.
+  // Note: We allow such RelinearizationKey only for substitution_power != 1.
   ASSERT_OK_AND_ASSIGN(
       auto relinearization_key,
       rlwe::RelinearizationKey<uint_m>::Create(key, prng_type_, /*num_parts=*/2,
-                                               kSmallLogDecompositionModulus));
+                                               kSmallLogDecompositionModulus,
+                                               /*substitution_power=*/5));
 
   // Create the initial plaintexts.
   std::vector<uint_m::Int> plaintext1 = SamplePlaintext(kPlaintextModulus);
@@ -431,7 +434,7 @@ TEST_P(RelinearizationKeyTest, CiphertextWithTooManyComponents) {
   Polynomial plaintext2_ntt =
       Polynomial::ConvertToNtt(mp2, ntt_params_.get(), params14_.get());
 
-  // Encrypt, multiply, apply the relinearization key.
+  // Encrypt and multiply to get a ciphertext of length 3.
   ASSERT_OK_AND_ASSIGN(auto ciphertext1,
                        Encrypt(key, plaintext1, params14_.get(),
                                ntt_params_.get(), error_params_.get()));
@@ -439,7 +442,12 @@ TEST_P(RelinearizationKeyTest, CiphertextWithTooManyComponents) {
                        Encrypt(key, plaintext2, params14_.get(),
                                ntt_params_.get(), error_params_.get()));
   ASSERT_OK_AND_ASSIGN(auto product, ciphertext1* ciphertext2);
-  EXPECT_THAT(relinearization_key.ApplyTo(product),
+  // Substitute with the desired power.
+  ASSERT_OK_AND_ASSIGN(auto subbed_product,
+                       product.Substitute(5, ntt_params_.get()));
+  ASSERT_EQ(subbed_product.Len(), 3);
+  // Apply the relinearization key.
+  EXPECT_THAT(relinearization_key.ApplyTo(subbed_product),
               StatusIs(absl::StatusCode::kInvalidArgument,
                        HasSubstr("RelinearizationKey not large enough")));
 }
@@ -447,10 +455,10 @@ TEST_P(RelinearizationKeyTest, CiphertextWithTooManyComponents) {
 TEST_P(RelinearizationKeyTest, LogDecompositionModulusOutOfBounds) {
   ASSERT_OK_AND_ASSIGN(auto key, SampleKey());
 
-  // RelinearizationKey has length 2.
+  // RelinearizationKey has length 3.
   EXPECT_THAT(
       rlwe::RelinearizationKey<uint_m>::Create(
-          key, prng_type_, /*num_parts=*/2,
+          key, prng_type_, /*num_parts=*/3,
           /*log_decomposition_modulus=*/key.ModulusParams()->log_modulus + 1),
       StatusIs(absl::StatusCode::kInvalidArgument,
                HasSubstr(absl::StrCat(
@@ -467,14 +475,30 @@ TEST_P(RelinearizationKeyTest, LogDecompositionModulusOutOfBounds) {
                                               ", must be positive."))));
 }
 
-TEST_P(RelinearizationKeyTest, NumPartsMustBePositive) {
+TEST_P(RelinearizationKeyTest, NumPartsMustBeAtLeastThreeWithSameBaseKey) {
   ASSERT_OK_AND_ASSIGN(auto key, SampleKey());
+  for (int i = -1; i < 3; ++i) {
+    EXPECT_THAT(
+        rlwe::RelinearizationKey<uint_m>::Create(
+            key, prng_type_, /*num_parts=*/i, kSmallLogDecompositionModulus),
+        StatusIs(absl::StatusCode::kInvalidArgument,
+                 HasSubstr(absl::StrCat("Num parts: ", i,
+                                        " must be at least three."))));
+  }
+}
 
-  EXPECT_THAT(
-      rlwe::RelinearizationKey<uint_m>::Create(
-          key, prng_type_, /*num_parts=*/-1, kSmallLogDecompositionModulus),
-      StatusIs(absl::StatusCode::kInvalidArgument,
-               HasSubstr("Num parts: -1 must be positive.")));
+TEST_P(RelinearizationKeyTest, NumPartsMustBeAtLeastTwoWithDifferentBaseKey) {
+  ASSERT_OK_AND_ASSIGN(auto key, SampleKey());
+  for (int i = -1; i < 2; ++i) {
+    // We have a different base key if substitution_power != 1.
+    EXPECT_THAT(
+        rlwe::RelinearizationKey<uint_m>::Create(
+            key, prng_type_, /*num_parts=*/i, kSmallLogDecompositionModulus,
+            /*substitution_power=*/5),
+        StatusIs(absl::StatusCode::kInvalidArgument,
+                 HasSubstr(absl::StrCat("Num parts: ", i,
+                                        " must be at least two."))));
+  }
 }
 
 TEST_P(RelinearizationKeyTest, InvalidDeserialize) {
@@ -499,21 +523,21 @@ TEST_P(RelinearizationKeyTest, InvalidDeserialize) {
                 StatusIs(absl::StatusCode::kInvalidArgument,
                          HasSubstr(absl::StrCat(
                              "The number of parts, ", serialized.num_parts(),
-                             ", must be greater than one."))));
+                             ", must be greater than two."))));
   }
   ASSERT_GT(serialized.c_size(), 2);
-  serialized.set_num_parts(serialized.c_size() - 1);
+  serialized.set_num_parts(serialized.c_size() + 1);
   EXPECT_THAT(
       RelinearizationKey::Deserialize(serialized, params80_.get(),
                                       ntt_params80_.get()),
       StatusIs(absl::StatusCode::kInvalidArgument,
                HasSubstr(absl::StrCat(
                    "The length of serialized, ", serialized.c_size(), ", ",
-                   "must be divisible by the number of parts minus one ",
-                   serialized.num_parts() - 1, "."))));
+                   "must be divisible by the number of parts minus two, ",
+                   serialized.num_parts() - 2, "."))));
   ASSERT_EQ(serialized.c_size(),
-            /* log2(kModulus80) / kLargeLogDecompositionModulus = */ 8);
-  serialized.set_num_parts(serialized.c_size() + 1);
+            /* log2(kModulus80) / kLargeLogDecompositionModulus = */ 4);
+  serialized.set_num_parts(serialized.c_size() + 2);
   EXPECT_THAT(RelinearizationKey::Deserialize(serialized, params80_.get(),
                                               ntt_params80_.get()),
               StatusIs(absl::StatusCode::kInvalidArgument,
@@ -535,9 +559,18 @@ TEST_P(RelinearizationKeyTest, SerializeKey) {
       rlwe::RelinearizationKey<uint_m>::Create(key, prng_type_, /*num_parts=*/3,
                                                kLargeLogDecompositionModulus));
 
-  // Serialize and deserialize.
+  // Serialize.
   ASSERT_OK_AND_ASSIGN(rlwe::SerializedRelinearizationKey serialized,
                        relinearization_key.Serialize());
+  ASSERT_EQ(serialized.c_size(),
+            /* log2(kModulus80) / kLargeLogDecompositionModulus = */ 4);
+  ASSERT_EQ(serialized.log_decomposition_modulus(),
+            kLargeLogDecompositionModulus);
+  ASSERT_EQ(serialized.num_parts(), 3);
+  ASSERT_EQ(serialized.prng_type(), prng_type_);
+  ASSERT_EQ(serialized.power_of_s(), 1);
+
+  // Deserialize.
   ASSERT_OK_AND_ASSIGN(auto deserialized,
                        RelinearizationKey::Deserialize(
                            serialized, params80_.get(), ntt_params80_.get()));

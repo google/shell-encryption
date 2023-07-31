@@ -3,27 +3,20 @@ load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
 
 # Tink
 http_archive(
-     name = "tink_base",
-     urls = ["https://github.com/google/tink/archive/master.zip"],
-     strip_prefix = "tink-master/",
+    name = "com_github_tink_crypto_tink_cc",
+    urls = ["https://github.com/tink-crypto/tink-cc/archive/refs/tags/v2.0.0.zip"],
+    strip_prefix = "tink-cc-2.0.0",
+    sha256 = "103ddfce800e77f3b3b6b2c808a8611bc734b31ddb12fbcfd8bebc1b96a7e963",
 )
 
-http_archive(
-     name = "tink_cc",
-     urls = ["https://github.com/google/tink/archive/master.zip"],
-     strip_prefix = "tink-master/cc",
-)
+# Load Tink dependencies.
 
-load("@tink_base//:tink_base_deps.bzl", "tink_base_deps")
-tink_base_deps()
+load("@com_github_tink_crypto_tink_cc//:tink_cc_deps.bzl", "tink_cc_deps")
 
-load("@tink_base//:tink_base_deps_init.bzl", "tink_base_deps_init")
-tink_base_deps_init()
-
-load("@tink_cc//:tink_cc_deps.bzl", "tink_cc_deps")
 tink_cc_deps()
 
-load("@tink_cc//:tink_cc_deps_init.bzl", "tink_cc_deps_init")
+load("@com_github_tink_crypto_tink_cc//:tink_cc_deps_init.bzl", "tink_cc_deps_init")
+
 tink_cc_deps_init()
 
 # rules_cc defines rules for generating C++ code from Protocol Buffers.
@@ -56,11 +49,10 @@ rules_proto_dependencies()
 rules_proto_toolchains()
 
 # Install gtest.
-git_repository(
-    name = "com_github_google_googletest",
-    commit = "703bd9caab50b139428cea1aaff9974ebee5742e",  # tag = "release-1.10.0"
-    remote = "https://github.com/google/googletest.git",
-    shallow_since = "1570114335 -0400",
+http_archive(
+  name = "com_github_google_googletest",
+  urls = ["https://github.com/google/googletest/archive/5ab508a01f9eb089207ee87fd547d290da39d015.zip"],
+  strip_prefix = "googletest-5ab508a01f9eb089207ee87fd547d290da39d015",
 )
 
 # abseil-cpp

@@ -16,6 +16,7 @@
 #include "shell_encryption/sample_error.h"
 
 #include <cstdint>
+#include <memory>
 #include <vector>
 
 #include <gmock/gmock.h>
@@ -43,7 +44,7 @@ TYPED_TEST_SUITE(SampleErrorTest, rlwe::testing::ModularIntTypes);
 TYPED_TEST(SampleErrorTest, CheckUpperBoundOnNoise) {
   using Int = typename TypeParam::Int;
 
-  auto prng = absl::make_unique<rlwe::testing::TestingPrng>(0);
+  auto prng = std::make_unique<rlwe::testing::TestingPrng>(0);
 
   for (const auto& params :
        rlwe::testing::ContextParameters<TypeParam>::Value()) {
@@ -71,7 +72,7 @@ TYPED_TEST(SampleErrorTest, CheckUpperBoundOnNoise) {
 }
 
 TYPED_TEST(SampleErrorTest, FailOnTooLargeVariance) {
-  auto prng = absl::make_unique<rlwe::testing::TestingPrng>(0);
+  auto prng = std::make_unique<rlwe::testing::TestingPrng>(0);
   for (const auto& params :
        rlwe::testing::ContextParameters<TypeParam>::Value()) {
     ASSERT_OK_AND_ASSIGN(auto context,

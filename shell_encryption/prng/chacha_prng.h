@@ -53,8 +53,8 @@ class ChaChaPrng : public SecurePrng {
   // errors.
   //
   // Thread safe.
-  static rlwe::StatusOr<std::unique_ptr<ChaChaPrng>> Create(
-      absl::string_view in_key);
+  static rlwe::StatusOr<std::unique_ptr<ChaChaPrng>>
+  Create(absl::string_view in_key);
 
   // Returns 8 bits of randomness.
   //

@@ -140,8 +140,8 @@ rlwe::StatusOr<std::vector<Polynomial<ModularInt>>> MatrixMultiply(
 template <typename ModularInt>
 rlwe::StatusOr<typename RelinearizationKey<ModularInt>::RelinearizationKeyPart>
 RelinearizationKey<ModularInt>::RelinearizationKeyPart::Create(
-    const Polynomial<ModularInt>& key_power,
-    const SymmetricRlweKey<ModularInt>& key,
+    const Polynomial<ModularInt>& key_power,  // the source key power s^j
+    const SymmetricRlweKey<ModularInt>& key,  // the target key s'
     const Uint64 log_decomposition_modulus,
     const ModularInt& decomposition_modulus, int dimension, SecurePrng* prng,
     SecurePrng* prng_encryption) {
@@ -158,7 +158,7 @@ RelinearizationKey<ModularInt>::RelinearizationKeyPart::Create(
   // For key_power = s^j, the ith iteration of this loop computes the column of
   // the KeyPart corresponding to (T^i s^j).
   for (int i = 0; i < dimension; ++i) {
-    // Sample r component orthogonal to (1,s).
+    // Sample r component orthogonal to (1, s').
     RLWE_ASSIGN_OR_RETURN(auto r, SampleOrthogonalFromPrng(key, prng));
 
     // Sample error.
@@ -255,9 +255,12 @@ RelinearizationKey<ModularInt>::Create(const SymmetricRlweKey<ModularInt>& key,
                                        PrngType prng_type, int num_parts,
                                        Uint64 log_decomposition_modulus,
                                        Uint64 substitution_power) {
-  if (num_parts <= 0) {
+  const bool has_identical_base_key = HasIdenticalBaseKey(substitution_power);
+  const int expected_num_parts = has_identical_base_key ? 3 : 2;
+  if (num_parts < expected_num_parts) {
     return absl::InvalidArgumentError(
-        absl::StrCat("Num parts: ", num_parts, " must be positive."));
+        absl::StrCat("Num parts: ", num_parts, " must be at least ",
+                     has_identical_base_key ? "three." : "two."));
   }
   if (log_decomposition_modulus <= 0) {
     return absl::InvalidArgumentError(
@@ -298,11 +301,12 @@ RelinearizationKey<ModularInt>::Create(const SymmetricRlweKey<ModularInt>& key,
 
   auto dimension = ComputeDimension<ModularInt>(log_decomposition_modulus,
                                                 key.ModulusParams());
+  int first_key_index = has_identical_base_key ? 2 : 1;
   std::vector<RelinearizationKeyPart> relinearization_key;
   relinearization_key.reserve(num_parts);
-  // Create RealinearizationKeyPart for each of the secret key parts: s, ...,
-  // s^k.
-  for (int i = 1; i < num_parts; i++) {
+  // Create RealinearizationKeyPart for each non-trivial power of the secret
+  // key s^first_key_index, ..., s^k.
+  for (int i = first_key_index; i < num_parts; i++) {
     if (i != 1) {
       // Increment the power of s.
       RLWE_RETURN_IF_ERROR(
@@ -333,9 +337,15 @@ RelinearizationKey<ModularInt>::ApplyTo(
         "RelinearizationKey not large enough for ciphertext.");
   }
 
+  // If this key is generated for target secret s' == s, then we store k - 2
+  // key parts where k is the ciphertext length; otherwise we store k - 1 key
+  // parts. The first RelinearizationKeyPart corresponds to the ciphertext
+  // component at `first_key_index`.
+  int first_key_index = HasIdenticalBaseKey() ? 2 : 1;
+
   // Initialize the result ciphertext of length 2 by applying the first
-  // relinearization key part to the first component of the ciphertext.
-  RLWE_ASSIGN_OR_RETURN(auto c1, ciphertext.Component(1));
+  // relinearization key part to its corresponding ciphertext component.
+  RLWE_ASSIGN_OR_RETURN(auto c1, ciphertext.Component(first_key_index));
   RLWE_ASSIGN_OR_RETURN(auto result, relinearization_key_[0].ApplyPartTo(
                                          c1, modulus_params_, ntt_params_));
 
@@ -343,7 +353,9 @@ RelinearizationKey<ModularInt>::ApplyTo(
   // it corresponds to.
   for (size_t i = 1; i < relinearization_key_.size(); i++) {
     // Add RelinearizationKeyPart_i c_i to the result vector.
-    RLWE_ASSIGN_OR_RETURN(auto temp_comp, ciphertext.Component(i + 1));
+    int ciphertext_index = i + first_key_index;
+    RLWE_ASSIGN_OR_RETURN(auto temp_comp,
+                          ciphertext.Component(ciphertext_index));
     RLWE_ASSIGN_OR_RETURN(auto result_part,
                           relinearization_key_[i].ApplyPartTo(
                               temp_comp, modulus_params_, ntt_params_));
@@ -356,11 +368,19 @@ RelinearizationKey<ModularInt>::ApplyTo(
   // RelinearizationKeyPart.
   RLWE_ASSIGN_OR_RETURN(auto c0, ciphertext.Component(0));
   RLWE_RETURN_IF_ERROR(result[0].AddInPlace(c0, modulus_params_));
+  // If the target secret key s' is the same as the source secret s, then
+  // we add the "s" component of ciphertext, i.e. the second component, to
+  // the result without any RelinearizationKeyPart.
+  if (HasIdenticalBaseKey()) {
+    RLWE_ASSIGN_OR_RETURN(auto c1, ciphertext.Component(1));
+    RLWE_RETURN_IF_ERROR(result[1].AddInPlace(c1, modulus_params_));
+  }
 
   return SymmetricRlweCiphertext<ModularInt>(
       std::move(result), 1,
       ciphertext.Error() +
-          ciphertext.ErrorParams()->B_relinearize(log_decomposition_modulus_),
+          ciphertext.ErrorParams()->B_relinearize(relinearization_key_.size(),
+                                                  log_decomposition_modulus_),
       modulus_params_, ciphertext.ErrorParams());
 }
 
@@ -391,17 +411,25 @@ RelinearizationKey<ModularInt>::Deserialize(
   // Verifies that the number of polynomials in serialized is expected.
   // A RelinearizationKey can decrypt ciphertexts with num_parts number of
   // components corresponding to decryption under (1, s, ..., s^k) or (1,
-  // s(x^power)) but only contains parts corresponding to the non-"1"
-  // components.
-  if (serialized.num_parts() <= 1) {
-    return absl::InvalidArgumentError(
-        absl::StrCat("The number of parts, ", serialized.num_parts(),
-                     ", must be greater than one."));
-  } else if (serialized.c_size() % (serialized.num_parts() - 1) != 0) {
+  // s(x^power)). For the former case, a RelinearizationKey contains parts
+  // corresponding to the non-"1" and non-"s" components, and for the latter
+  // case, it contains only the parts corresponding to the non-"1" components.
+  // We are in the former case if the substitution power of the base key s is 1.
+  bool has_identical_base_key = HasIdenticalBaseKey(serialized.power_of_s());
+  int first_key_index = has_identical_base_key ? 2 : 1;
+  if (serialized.num_parts() <= first_key_index) {
+    return absl::InvalidArgumentError(absl::StrCat(
+        "The number of parts, ", serialized.num_parts(),
+        ", must be greater than ", has_identical_base_key ? "two." : "one."));
+  }
+  // The number of RelinearizationKeyParts.
+  int expected_num_key_parts = serialized.num_parts() - first_key_index;
+  if (serialized.c_size() % expected_num_key_parts != 0) {
     return absl::InvalidArgumentError(
         absl::StrCat("The length of serialized, ", serialized.c_size(), ", ",
-                     "must be divisible by the number of parts minus one ",
-                     serialized.num_parts() - 1, "."));
+                     "must be divisible by the number of parts minus ",
+                     has_identical_base_key ? "two, " : "one, ",
+                     expected_num_key_parts, "."));
   }
 
   // Return an error when log decomposition modulus is non-positive.
@@ -416,11 +444,8 @@ RelinearizationKey<ModularInt>::Deserialize(
         ", must be at most: ", modulus_params->log_modulus, "."));
   }
 
-  int polynomials_per_matrix =
-      serialized.c_size() / (serialized.num_parts() - 1);
-
-  int dimension = polynomials_per_matrix;
-  if (dimension !=
+  int polynomials_per_key_part = serialized.c_size() / expected_num_key_parts;
+  if (polynomials_per_key_part !=
       ComputeDimension<ModularInt>(serialized.log_decomposition_modulus(),
                                    modulus_params)) {
     return absl::InvalidArgumentError(
@@ -434,7 +459,7 @@ RelinearizationKey<ModularInt>::Deserialize(
                             modulus_params));
   RelinearizationKey output(serialized.log_decomposition_modulus(),
                             decomposition_modulus, modulus_params, ntt_params);
-  output.dimension_ = dimension;
+  output.dimension_ = polynomials_per_key_part;
   output.num_parts_ = serialized.num_parts();
   output.prng_seed_ = serialized.prng_seed();
   output.prng_type_ = serialized.prng_type();
@@ -452,12 +477,12 @@ RelinearizationKey<ModularInt>::Deserialize(
     return absl::InvalidArgumentError("Invalid PRNG type is specified.");
   }
 
-  // Takes each polynomials_per_matrix chunk of serialized.c()'s and places them
-  // into a KeyPart.
-  output.relinearization_key_.reserve(serialized.num_parts() - 1);
-  for (int i = 0; i < (serialized.num_parts() - 1); i++) {
-    auto start = serialized.c().begin() + i * polynomials_per_matrix;
-    auto end = start + polynomials_per_matrix;
+  // Takes each polynomials_per_key_part chunk of serialized.c()'s and places
+  // them into a KeyPart.
+  output.relinearization_key_.reserve(expected_num_key_parts);
+  for (int i = 0; i < expected_num_key_parts; i++) {
+    auto start = serialized.c().begin() + i * polynomials_per_key_part;
+    auto end = start + polynomials_per_key_part;
     std::vector<SerializedNttPolynomial> chunk(start, end);
     RLWE_ASSIGN_OR_RETURN(auto deserialized,
                           RelinearizationKeyPart::Deserialize(

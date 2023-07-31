@@ -15,6 +15,7 @@
 
 #include "shell_encryption/testing/coefficient_polynomial_ciphertext.h"
 
+#include <memory>
 #include <random>
 #include <vector>
 
@@ -63,14 +64,14 @@ class PolynomialCiphertextTest : public ::testing::Test {
     ASSERT_OK_AND_ASSIGN(auto ntt_params,
                          rlwe::InitializeNttParameters<uint_m>(
                              rlwe::testing::kLogCoeffs, params14_.get()));
-    ntt_params_ = absl::make_unique<const rlwe::NttParameters<uint_m>>(
+    ntt_params_ = std::make_unique<const rlwe::NttParameters<uint_m>>(
         std::move(ntt_params));
     ASSERT_OK_AND_ASSIGN(
         auto error_params,
         rlwe::ErrorParams<uint_m>::Create(kDefaultLogT, kDefaultVariance,
                                           params14_.get(), ntt_params_.get()));
     error_params_ =
-        absl::make_unique<const rlwe::ErrorParams<uint_m>>(error_params);
+        std::make_unique<const rlwe::ErrorParams<uint_m>>(error_params);
   }
 
   // Sample a random key.

@@ -34,7 +34,7 @@ absl::Status HkdfPrngResalt(absl::string_view key, int buffer_size,
   if (!status_or_buf.ok()) {
     return status_or_buf.status();
   }
-  auto buf = std::move(status_or_buf).ValueOrDie();
+  auto buf = std::move(status_or_buf).value();
   buffer->assign(buf.begin(), buf.end());
   ++(*salt_counter);
   *position_in_buffer = 0;

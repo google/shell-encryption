@@ -16,6 +16,7 @@
 #include "shell_encryption/polynomial.h"
 
 #include <cmath>
+#include <memory>
 #include <random>
 #include <vector>
 
@@ -94,7 +95,7 @@ class PolynomialTest : public ::testing::Test {
     ASSERT_OK_AND_ASSIGN(auto ntt_params, rlwe::InitializeNttParameters<uint_m>(
                                               log_n, params14_.get()));
     ntt_params_ =
-        absl::make_unique<rlwe::NttParameters<uint_m>>(std::move(ntt_params));
+        std::make_unique<rlwe::NttParameters<uint_m>>(std::move(ntt_params));
 
     // Put p and q in the NTT domain.
     ntt_p_ =

@@ -78,7 +78,6 @@ class SymmetricRlweCiphertext {
         error_params_(error_params),
         power_of_s_(1),
         error_(0) {}
-  SymmetricRlweCiphertext(const SymmetricRlweCiphertext& that) = default;
 
   // Create a ciphertext by supplying the vector of components.
   explicit SymmetricRlweCiphertext(std::vector<Polynomial<ModularInt>> c,
@@ -407,7 +406,7 @@ class SymmetricRlweCiphertext {
   // the same as in the homomorphic absorb operation above (the other overload
   // of the * operator).
   rlwe::StatusOr<SymmetricRlweCiphertext> operator*(
-      const SymmetricRlweCiphertext& that) {
+      const SymmetricRlweCiphertext& that) const {
     if (power_of_s_ != that.power_of_s_) {
       return absl::InvalidArgumentError(
           "Ciphertexts must be encrypted with the same key power.");

@@ -52,8 +52,8 @@ class SingleThreadChaChaPrng : public SecurePrng {
   //
   // Fails if the key is not the expected size or on internal cryptographic
   // errors.
-  static rlwe::StatusOr<std::unique_ptr<SingleThreadChaChaPrng>> Create(
-      absl::string_view in_key);
+  static rlwe::StatusOr<std::unique_ptr<SingleThreadChaChaPrng>>
+      Create(absl::string_view in_key);
 
   // Returns 8 bits of randomness.
   //

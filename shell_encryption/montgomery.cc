@@ -480,6 +480,7 @@ template class MontgomeryInt<Uint16>;
 template class MontgomeryInt<Uint32>;
 template class MontgomeryInt<Uint64>;
 template class MontgomeryInt<absl::uint128>;
+
 #ifdef ABSL_HAVE_INTRINSIC_INT128
 template struct MontgomeryIntParams<unsigned __int128>;
 template class MontgomeryInt<unsigned __int128>;

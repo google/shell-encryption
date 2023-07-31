@@ -103,10 +103,10 @@ cc_library(
     deps = [
         "//shell_encryption:integral_types",
         "//shell_encryption:statusor_fork",
+        "@com_github_tink_crypto_tink_cc//tink/subtle",
         "@com_google_absl//absl/memory",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/strings",
-        "@tink_cc//subtle",
     ],
 )
 
