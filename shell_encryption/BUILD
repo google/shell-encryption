@@ -476,6 +476,15 @@ cc_test(
     ],
 )
 
+cc_library(
+    name = "gadget",
+    hdrs = ["gadget.h"],
+    deps = [
+        ":statusor_fork",
+        "@com_google_absl//absl/status",
+    ],
+)
+
 # Relinearization Key
 
 cc_library(
@@ -484,6 +493,7 @@ cc_library(
     hdrs = ["relinearization_key.h"],
     deps = [
         ":bits_util",
+        ":gadget",
         ":montgomery",
         ":sample_error",
         ":serialization_cc_proto",
@@ -505,6 +515,7 @@ cc_test(
     srcs = ["relinearization_key_test.cc"],
     deps = [
         ":constants",
+        ":gadget",
         ":montgomery",
         ":ntt_parameters",
         ":polynomial",

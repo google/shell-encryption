@@ -23,6 +23,7 @@
 #include "shell_encryption/bits_util.h"
 #include "shell_encryption/montgomery.h"
 #include "shell_encryption/prng/prng.h"
+#include "shell_encryption/gadget.h"
 #include "shell_encryption/prng/single_thread_chacha_prng.h"
 #include "shell_encryption/prng/single_thread_hkdf_prng.h"
 #include "shell_encryption/serialization.pb.h"
@@ -32,14 +33,6 @@
 
 namespace rlwe {
 namespace {
-// Method to compute the number of digits needed to represent integers mod
-// q in base T.
-template <typename ModularInt>
-inline int ComputeDimension(Uint64 log_decomposition_modulus,
-                            const typename ModularInt::Params* modulus_params) {
-  return (modulus_params->log_modulus + (log_decomposition_modulus - 1)) /
-         log_decomposition_modulus;
-}
 
 // Returns a random vector r orthogonal to (1,s). The second component is chosen
 // using randomness-of-encryption sampled using the specified PRNG. The first
@@ -77,40 +70,6 @@ rlwe::StatusOr<std::vector<Polynomial<ModularInt>>> PowersOfT(
     }
     result.push_back(key_to_i);
   }
-  return result;
-}
-
-// The i-th component of the result contains a vector of i-th digits of the
-// coefficients in base T (the decomposition modulus).
-template <typename ModularInt>
-rlwe::StatusOr<std::vector<std::vector<ModularInt>>> BitDecompose(
-    const std::vector<ModularInt>& coefficients,
-    const typename ModularInt::Params* modulus_params,
-    const Uint64 log_decomposition_modulus, int dimension) {
-  std::vector<typename ModularInt::Int> ciphertext_coeffs(coefficients.size(),
-                                                          0);
-  std::transform(
-      coefficients.begin(), coefficients.end(), ciphertext_coeffs.begin(),
-      [modulus_params](ModularInt x) { return x.ExportInt(modulus_params); });
-
-  // Compute the mask to extract the log_decomposition_modulus least significant
-  // bits
-  typename ModularInt::Int mask =
-      (static_cast<typename ModularInt::Int>(1) << log_decomposition_modulus) -
-      1;
-
-  std::vector<std::vector<ModularInt>> result(dimension);
-  for (int i = 0; i < dimension; i++) {
-    result[i].reserve(ciphertext_coeffs.size());
-    for (size_t j = 0; j < ciphertext_coeffs.size(); ++j) {
-      RLWE_ASSIGN_OR_RETURN(
-          auto coefficient_part,
-          ModularInt::ImportInt((ciphertext_coeffs[j] & mask), modulus_params));
-      result[i].push_back(std::move(coefficient_part));
-      ciphertext_coeffs[j] >>= log_decomposition_modulus;
-    }
-  }
-
   return result;
 }
 
@@ -194,7 +153,7 @@ RelinearizationKey<ModularInt>::RelinearizationKeyPart::ApplyPartTo(
   // Bit-decompose the vector of coefficients in the ciphertext.
   RLWE_ASSIGN_OR_RETURN(
       std::vector<std::vector<ModularInt>> decomposed_coefficients,
-      BitDecompose<ModularInt>(ciphertext_coefficients, modulus_params,
+      rlwe::BaseDecompose<ModularInt>(ciphertext_coefficients, modulus_params,
                                log_decomposition_modulus_, matrix_[0].size()));
 
   // Matrix multiply with the bit-decomposed coefficients.
@@ -237,7 +196,7 @@ RelinearizationKey<ModularInt>::RelinearizationKey(
     PrngType prng_type, int num_parts, Uint64 log_decomposition_modulus,
     Uint64 substitution_power, ModularInt decomposition_modulus,
     std::vector<RelinearizationKeyPart> relinearization_key)
-    : dimension_(ComputeDimension<ModularInt>(log_decomposition_modulus,
+    : dimension_(GadgetSize<ModularInt>(log_decomposition_modulus,
                                               key.ModulusParams())),
       num_parts_(num_parts),
       log_decomposition_modulus_(log_decomposition_modulus),
@@ -299,7 +258,7 @@ RelinearizationKey<ModularInt>::Create(const SymmetricRlweKey<ModularInt>& key,
     return absl::InvalidArgumentError("PrngType not specified correctly.");
   }
 
-  auto dimension = ComputeDimension<ModularInt>(log_decomposition_modulus,
+  auto dimension = GadgetSize<ModularInt>(log_decomposition_modulus,
                                                 key.ModulusParams());
   int first_key_index = has_identical_base_key ? 2 : 1;
   std::vector<RelinearizationKeyPart> relinearization_key;
@@ -446,7 +405,7 @@ RelinearizationKey<ModularInt>::Deserialize(
 
   int polynomials_per_key_part = serialized.c_size() / expected_num_key_parts;
   if (polynomials_per_key_part !=
-      ComputeDimension<ModularInt>(serialized.log_decomposition_modulus(),
+      GadgetSize<ModularInt>(serialized.log_decomposition_modulus(),
                                    modulus_params)) {
     return absl::InvalidArgumentError(
         absl::StrCat("Number of NTT Polynomials does not match expected ",
