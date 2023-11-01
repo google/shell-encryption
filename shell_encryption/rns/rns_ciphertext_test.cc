@@ -177,6 +177,34 @@ TYPED_TEST(RnsCiphertextTest, AddFailsIfPowerOfSMismatch) {
                HasSubstr("`that` is encrypted with a different key power")));
 }
 
+TYPED_TEST(RnsCiphertextTest, AddPlaintextFailsIfLevelMismatch) {
+  // This test requires at least two RNS moduli.
+  if (this->moduli_.size() <= 1) {
+    return;
+  }
+
+  // Create a ciphertext at highest level.
+  int curr_level = this->moduli_.size() - 1;
+  ASSERT_OK_AND_ASSIGN(auto zero,
+                       RnsPolynomial<TypeParam>::CreateZero(
+                           this->rns_context_->LogN(), this->moduli_));
+  RnsRlweCiphertext<TypeParam> ct0(/*components=*/{zero, zero}, this->moduli_,
+                                   /*power_of_s=*/1, /*error=*/0,
+                                   this->error_params_.get());
+  ASSERT_EQ(ct0.Level(), curr_level);
+
+  // Create a plaintext polynomial with fewer RNS moduli (so at a lower level).
+  std::vector<const PrimeModulus<TypeParam>*> moduli_reduced = this->moduli_;
+  moduli_reduced.pop_back();
+  ASSERT_OK_AND_ASSIGN(auto zero_reduced,
+                       RnsPolynomial<TypeParam>::CreateZero(
+                           this->rns_context_->LogN(), moduli_reduced));
+  ASSERT_EQ(zero_reduced.NumModuli(), this->moduli_.size() - 1);
+  EXPECT_THAT(ct0.AddInPlace(zero_reduced),
+              StatusIs(absl::StatusCode::kInvalidArgument,
+                       HasSubstr("`plaintext` has a mismatched level")));
+}
+
 TYPED_TEST(RnsCiphertextTest, SubFailsIfDegreeMismatch) {
   ASSERT_OK_AND_ASSIGN(auto zero,
                        RnsPolynomial<TypeParam>::CreateZero(
@@ -228,6 +256,35 @@ TYPED_TEST(RnsCiphertextTest, SubFailsIfLevelMismatch) {
   EXPECT_THAT(ct0.SubInPlace(ct1),
               StatusIs(absl::StatusCode::kInvalidArgument,
                        HasSubstr("`that` has a mismatched level")));
+}
+
+TYPED_TEST(RnsCiphertextTest, SubPlaintextFailsIfLevelMismatch) {
+  // This test requires at least two RNS moduli.
+  if (this->moduli_.size() <= 1) {
+    return;
+  }
+
+  // Create a ciphertext at highest level.
+  int curr_level = this->moduli_.size() - 1;
+  ASSERT_OK_AND_ASSIGN(auto zero,
+                       RnsPolynomial<TypeParam>::CreateZero(
+                           this->rns_context_->LogN(), this->moduli_));
+  RnsRlweCiphertext<TypeParam> ct0(/*components=*/{zero, zero}, this->moduli_,
+                                   /*power_of_s=*/1, /*error=*/0,
+                                   this->error_params_.get());
+  ASSERT_EQ(ct0.Level(), curr_level);
+
+  // Create a plaintext polynomial with fewer RNS moduli (so at a lower level).
+  std::vector<const PrimeModulus<TypeParam>*> moduli_reduced = this->moduli_;
+  moduli_reduced.pop_back();
+  ASSERT_OK_AND_ASSIGN(auto zero_reduced,
+                       RnsPolynomial<TypeParam>::CreateZero(
+                           this->rns_context_->LogN(), moduli_reduced));
+  ASSERT_EQ(zero_reduced.NumModuli(), this->moduli_.size() - 1);
+
+  EXPECT_THAT(ct0.SubInPlace(zero_reduced),
+              StatusIs(absl::StatusCode::kInvalidArgument,
+                       HasSubstr("`plaintext` has a mismatched level")));
 }
 
 TYPED_TEST(RnsCiphertextTest, SubFailsIfPowerOfSMismatch) {

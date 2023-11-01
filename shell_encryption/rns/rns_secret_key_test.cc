@@ -353,6 +353,148 @@ TYPED_TEST(RnsRlweSecretKeyTest, DecryptBgvOnModReducedCiphertext) {
   EXPECT_EQ(dec_messages, messages);
 }
 
+TYPED_TEST(RnsRlweSecretKeyTest, DecryptBgvOnNegatedCiphertext) {
+  using Integer = typename TypeParam::Int;
+
+  ASSERT_OK_AND_ASSIGN(RnsRlweSecretKey<TypeParam> key, this->SampleKey());
+
+  // Sample a plaintext polynomial and encrypt it.
+  Integer t = this->rns_context_->PlaintextModulus();
+  std::vector<Integer> messages =
+      testing::SampleMessages(1 << this->rns_context_->LogN(), t);
+  ASSERT_OK_AND_ASSIGN(
+      RnsBgvCiphertext<TypeParam> ciphertext,
+      key.EncryptBgv(messages, this->coeff_encoder_.get(),
+                     this->error_params_.get(), this->prng_.get()));
+
+  // Homomorphically negate the ciphertext.
+  ASSERT_OK_AND_ASSIGN(RnsBgvCiphertext<TypeParam> ciphertext_neg,
+                       ciphertext.Negate());
+
+  // The negated ciphertext should decrypt to negated plaintext.
+  ASSERT_OK_AND_ASSIGN(
+      std::vector<Integer> dec_neg_messages,
+      key.DecryptBgv(ciphertext_neg, this->coeff_encoder_.get()));
+  ASSERT_EQ(dec_neg_messages.size(), messages.size());
+  for (int i = 0; i < messages.size(); ++i) {
+    Integer expected = (t - messages[i]) % t;  // -messages[i] (mod t).
+    EXPECT_EQ(dec_neg_messages[i], expected);
+  }
+
+  // The sum of two ciphertexts should decrypt to zero.
+  ASSERT_OK_AND_ASSIGN(RnsBgvCiphertext<TypeParam> ciphertext_sum,
+                       ciphertext + ciphertext_neg);
+  ASSERT_OK_AND_ASSIGN(
+      std::vector<Integer> dec_sum_messages,
+      key.DecryptBgv(ciphertext_sum, this->coeff_encoder_.get()));
+  ASSERT_EQ(dec_sum_messages.size(), messages.size());
+  for (int i = 0; i < dec_sum_messages.size(); ++i) {
+    EXPECT_EQ(dec_sum_messages[i], 0);
+  }
+}
+
+TYPED_TEST(RnsRlweSecretKeyTest, DecryptBgvOnSum) {
+  using Integer = typename TypeParam::Int;
+
+  ASSERT_OK_AND_ASSIGN(RnsRlweSecretKey<TypeParam> key, this->SampleKey());
+  const CoefficientEncoder<TypeParam>* encoder = this->coeff_encoder_.get();
+
+  // Sample two plaintext polynomials and encrypt them.
+  int num_coeffs = 1 << this->rns_context_->LogN();
+  Integer t = this->rns_context_->PlaintextModulus();
+  std::vector<Integer> messages0 = testing::SampleMessages(num_coeffs, t);
+  std::vector<Integer> messages1 = testing::SampleMessages(num_coeffs, t);
+  ASSERT_OK_AND_ASSIGN(
+      RnsBgvCiphertext<TypeParam> ciphertext0,
+      key.EncryptBgv(messages0, this->coeff_encoder_.get(),
+                     this->error_params_.get(), this->prng_.get()));
+  ASSERT_OK_AND_ASSIGN(
+      RnsBgvCiphertext<TypeParam> ciphertext1,
+      key.EncryptBgv(messages1, this->coeff_encoder_.get(),
+                     this->error_params_.get(), this->prng_.get()));
+
+  // Homomorphically add the two ciphertexts.
+  ASSERT_OK_AND_ASSIGN(RnsBgvCiphertext<TypeParam> ciphertext_sum,
+                       ciphertext0 + ciphertext1);
+
+  // The ciphertext should decrypt to the sum of messages (mod t).
+  ASSERT_OK_AND_ASSIGN(std::vector<Integer> dec_sum_messages,
+                       key.DecryptBgv(ciphertext_sum, encoder));
+  ASSERT_EQ(dec_sum_messages.size(), num_coeffs);
+  for (int i = 0; i < num_coeffs; ++i) {
+    Integer expected = (messages0[i] + messages1[i]) % t;
+    EXPECT_EQ(dec_sum_messages[i], expected);
+  }
+
+  // Encode `messages1` to a plaintext polynomial and homomorphically add it to
+  // `ciphertext0`.
+  ASSERT_OK_AND_ASSIGN(RnsPolynomial<TypeParam> plaintext1,
+                       encoder->EncodeBgv(messages1, this->main_moduli_));
+  ASSERT_OK(plaintext1.ConvertToNttForm(this->main_moduli_));
+  ASSERT_OK_AND_ASSIGN(RnsBgvCiphertext<TypeParam> ciphertext_sum_plaintext,
+                       ciphertext0 + plaintext1);
+
+  // This ciphertext should also decrypt to the sum of messages (mod t).
+  ASSERT_OK_AND_ASSIGN(std::vector<Integer> dec_sum_plaintext_messages,
+                       key.DecryptBgv(ciphertext_sum_plaintext, encoder));
+  ASSERT_EQ(dec_sum_plaintext_messages.size(), num_coeffs);
+  for (int i = 0; i < num_coeffs; ++i) {
+    Integer expected = (messages0[i] + messages1[i]) % t;
+    EXPECT_EQ(dec_sum_plaintext_messages[i], expected);
+  }
+}
+
+TYPED_TEST(RnsRlweSecretKeyTest, DecryptBgvOnDiff) {
+  using Integer = typename TypeParam::Int;
+
+  ASSERT_OK_AND_ASSIGN(RnsRlweSecretKey<TypeParam> key, this->SampleKey());
+  const CoefficientEncoder<TypeParam>* encoder = this->coeff_encoder_.get();
+
+  // Sample two plaintext polynomials and encrypt them.
+  int num_coeffs = 1 << this->rns_context_->LogN();
+  Integer t = this->rns_context_->PlaintextModulus();
+  std::vector<Integer> messages0 = testing::SampleMessages(num_coeffs, t);
+  std::vector<Integer> messages1 = testing::SampleMessages(num_coeffs, t);
+  ASSERT_OK_AND_ASSIGN(
+      RnsBgvCiphertext<TypeParam> ciphertext0,
+      key.EncryptBgv(messages0, this->coeff_encoder_.get(),
+                     this->error_params_.get(), this->prng_.get()));
+  ASSERT_OK_AND_ASSIGN(
+      RnsBgvCiphertext<TypeParam> ciphertext1,
+      key.EncryptBgv(messages1, this->coeff_encoder_.get(),
+                     this->error_params_.get(), this->prng_.get()));
+
+  // Homomorphically subtract the two ciphertexts.
+  ASSERT_OK_AND_ASSIGN(RnsBgvCiphertext<TypeParam> ciphertext_diff,
+                       ciphertext0 - ciphertext1);
+
+  // The ciphertext should decrypt to the difference of messages (mod t).
+  ASSERT_OK_AND_ASSIGN(std::vector<Integer> dec_diff_messages,
+                       key.DecryptBgv(ciphertext_diff, encoder));
+  ASSERT_EQ(dec_diff_messages.size(), num_coeffs);
+  for (int i = 0; i < num_coeffs; ++i) {
+    Integer expected = (t + messages0[i] - messages1[i]) % t;
+    EXPECT_EQ(dec_diff_messages[i], expected);
+  }
+
+  // Encode `messages1` to a plaintext polynomial and homomorphically add it to
+  // `ciphertext0`.
+  ASSERT_OK_AND_ASSIGN(RnsPolynomial<TypeParam> plaintext1,
+                       encoder->EncodeBgv(messages1, this->main_moduli_));
+  ASSERT_OK(plaintext1.ConvertToNttForm(this->main_moduli_));
+  ASSERT_OK_AND_ASSIGN(RnsBgvCiphertext<TypeParam> ciphertext_diff_plaintext,
+                       ciphertext0 - plaintext1);
+
+  // This ciphertext should also decrypt to the diff of messages (mod t).
+  ASSERT_OK_AND_ASSIGN(std::vector<Integer> dec_diff_plaintext_messages,
+                       key.DecryptBgv(ciphertext_diff_plaintext, encoder));
+  ASSERT_EQ(dec_diff_plaintext_messages.size(), num_coeffs);
+  for (int i = 0; i < num_coeffs; ++i) {
+    Integer expected = (t + messages0[i] - messages1[i]) % t;
+    EXPECT_EQ(dec_diff_plaintext_messages[i], expected);
+  }
+}
+
 TYPED_TEST(RnsRlweSecretKeyTest, DecryptBgvOnDegreeTwoCiphertext) {
   using Integer = typename TypeParam::Int;
 
