@@ -64,7 +64,15 @@ class RnsRlweCiphertext {
     return RnsRlweCiphertext({}, moduli, /*power_of_s=*/1, 0, error_params);
   }
 
-  // Homomorphically add `that` to this ciphertext.
+  // Homomorphically negate the underlying plaintext in place.
+  absl::Status NegateInPlace() {
+    for (auto& c : components_) {
+      RLWE_RETURN_IF_ERROR(c.NegateInPlace(moduli_));
+    }
+    return absl::OkStatus();
+  }
+
+  // Homomorphically add another ciphertext `that` to this ciphertext.
   // It is assumed that the two ciphertexts have the same modulus and the same
   // plaintext modulus.
   absl::Status AddInPlace(const RnsRlweCiphertext& that) {
@@ -83,6 +91,16 @@ class RnsRlweCiphertext {
           components_[i].AddInPlace(that.components_[i], moduli_));
     }
     error_ += that.error_;
+    return absl::OkStatus();
+  }
+
+  // Homomorphically add `plaintext` to this ciphertext.
+  // It is assumed that `plaintext` is a polynomial in the plaintext space.
+  absl::Status AddInPlace(const RnsPolynomial<ModularInt>& plaintext) {
+    if (Level() + 1 != plaintext.NumModuli()) {
+      return absl::InvalidArgumentError("`plaintext` has a mismatched level.");
+    }
+    RLWE_RETURN_IF_ERROR(components_[0].AddInPlace(plaintext, moduli_));
     return absl::OkStatus();
   }
 
@@ -105,6 +123,16 @@ class RnsRlweCiphertext {
           components_[i].SubInPlace(that.components_[i], moduli_));
     }
     error_ += that.error_;
+    return absl::OkStatus();
+  }
+
+  // Homomorphically subtract `plaintext` from this ciphertext.
+  // It is assumed that `plaintext` is a polynomial in the plaintext space.
+  absl::Status SubInPlace(const RnsPolynomial<ModularInt>& plaintext) {
+    if (Level() + 1 != plaintext.NumModuli()) {
+      return absl::InvalidArgumentError("`plaintext` has a mismatched level.");
+    }
+    RLWE_RETURN_IF_ERROR(components_[0].SubInPlace(plaintext, moduli_));
     return absl::OkStatus();
   }
 

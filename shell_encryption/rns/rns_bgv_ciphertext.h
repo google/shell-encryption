@@ -52,13 +52,29 @@ class RnsBgvCiphertext : public RnsRlweCiphertext<ModularInt> {
   explicit RnsBgvCiphertext(RnsRlweCiphertext<ModularInt> ciphertext)
       : RnsRlweCiphertext<ModularInt>(std::move(ciphertext)) {}
 
-  // Returns the homomorphic addition of this ciphertext with `that`.
+  // Returns the homomorphic negation of this ciphertext.
+  absl::StatusOr<RnsBgvCiphertext> Negate() const {
+    RnsBgvCiphertext out = *this;
+    RLWE_RETURN_IF_ERROR(out.NegateInPlace());
+    return out;
+  }
+
+  // Returns the homomorphic addition of this ciphertext with ciphertext `that`.
   // It is assumed that the two ciphertexts have the same modulus and the same
   // plaintext modulus.
   absl::StatusOr<RnsBgvCiphertext> operator+(
       const RnsBgvCiphertext& that) const {
     RnsBgvCiphertext out = *this;
     RLWE_RETURN_IF_ERROR(out.AddInPlace(that));
+    return out;
+  }
+
+  // Returns the homomorphic addition of this ciphertext with `plaintext`.
+  // It is assumed that `plaintext` is a polynomial in the plaintext space.
+  absl::StatusOr<RnsBgvCiphertext> operator+(
+      const RnsPolynomial<ModularInt>& plaintext) const {
+    RnsBgvCiphertext out = *this;
+    RLWE_RETURN_IF_ERROR(out.AddInPlace(plaintext));
     return out;
   }
 
@@ -69,6 +85,15 @@ class RnsBgvCiphertext : public RnsRlweCiphertext<ModularInt> {
       const RnsBgvCiphertext& that) const {
     RnsBgvCiphertext out = *this;
     RLWE_RETURN_IF_ERROR(out.SubInPlace(that));
+    return out;
+  }
+
+  // Returns the homomorphic subtraction of this ciphertext by `plaintext`.
+  // It is assumed that `plaintext` is a polynomial in the plaintext space.
+  absl::StatusOr<RnsBgvCiphertext> operator-(
+      const RnsPolynomial<ModularInt>& plaintext) const {
+    RnsBgvCiphertext out = *this;
+    RLWE_RETURN_IF_ERROR(out.SubInPlace(plaintext));
     return out;
   }
 
