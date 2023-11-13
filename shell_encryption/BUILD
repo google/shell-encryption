@@ -187,6 +187,7 @@ cc_library(
         "//shell_encryption/prng",
         "@com_github_google_glog//:glog",
         "@com_google_absl//absl/numeric:int128",
+        "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings",
     ],
 )

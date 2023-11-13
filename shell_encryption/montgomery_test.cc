@@ -557,6 +557,87 @@ TYPED_TEST(MontgomeryTest, InverseModulus) {
   }
 }
 
+TYPED_TEST(MontgomeryTest, FastInverseModulusFailsIfNotCoprime) {
+  using Int = typename TypeParam::Int;
+  for (const auto& params :
+       rlwe::testing::ContextParameters<TypeParam>::Value()) {
+    Int a = params.modulus;
+    // In this test we set modulus = 3 * params.modulus == 3 * x, which forces
+    // the gcd of a and modulus != 1 and hence there is no inverse of a (mod
+    // modulus).
+    Int modulus = 3 * params.modulus;
+    // Check that the modulus is smaller than max(Int) / 4 to be representable
+    // as a Montgomery integer.
+    Int most_significant_bit = modulus >> (sizeof(Int) * 8 - 2);
+    if (most_significant_bit != 0) {
+      continue;  // modulus is too large, not suitable for this test.
+    }
+    ASSERT_OK_AND_ASSIGN(auto modulus_params,
+                         TypeParam::Params::Create(modulus));
+    ASSERT_OK_AND_ASSIGN(auto a_m,
+                         TypeParam::ImportInt(a, modulus_params.get()));
+    EXPECT_THAT(a_m.MultiplicativeInverseFast(modulus_params.get()),
+                StatusIs(absl::StatusCode::kInvalidArgument,
+                         HasSubstr("Multiplicative inverse does not exist")));
+  }
+}
+
+TYPED_TEST(MontgomeryTest, FastInverseModulus) {
+  using Int = typename TypeParam::Int;
+
+  // Check modular inverse of a (mod modulus) where modulus is a prime number,
+  // so the inverse should always exists unless a == 0.
+  unsigned int seed = 0;
+
+  for (const auto& params :
+       rlwe::testing::ContextParameters<TypeParam>::Value()) {
+    ASSERT_OK_AND_ASSIGN(auto modulus_params,
+                         TypeParam::Params::Create(params.modulus));
+    for (int i = 0; i < kTestingRounds; i++) {
+      Int a = GenerateRandom<Int>(&seed) % modulus_params->modulus;
+      if (a == 0) {
+        continue;  // no inverse exists
+      }
+      ASSERT_OK_AND_ASSIGN(auto a_m,
+                           TypeParam::ImportInt(a, modulus_params.get()));
+      ASSERT_OK_AND_ASSIGN(TypeParam inv,
+                           a_m.MultiplicativeInverseFast(modulus_params.get()));
+      ASSERT_EQ(
+          (a_m.Mul(inv, modulus_params.get())).ExportInt(modulus_params.get()),
+          1);
+    }
+  }
+
+  // Next, check modular inverse of a (mod modulus) where modulus may not be
+  // a prime number. We only check the case where the inverse exists for sure.
+  seed = 0;
+  constexpr Int primes[] = {3, 7, 13, 17, 19};
+  for (int i = 0; i < kExhaustiveTest; ++i) {
+    // Generate a random odd modulus in the range. Make sure that the modulus is
+    // larger than all test elements in `primes` and smaller than max(Int) / 4.
+    Int x = (GenerateRandom<Int>(&seed) % (GetIntMax<Int>() / 16)) + 20;
+    Int modulus = (x << 1) + 1;
+    ASSERT_OK_AND_ASSIGN(auto modulus_params,
+                         TypeParam::Params::Create(modulus));
+    for (Int a : primes) {
+      if (modulus % a == 0) {
+        // No modular inverse of a (mod modulus).
+        continue;
+      }
+      ASSERT_LT(a, modulus);
+      // Since a is a prime and it does not divide modulus, a^(-1) (mod modulus)
+      // should exist.
+      ASSERT_OK_AND_ASSIGN(auto a_m,
+                           TypeParam::ImportInt(a, modulus_params.get()));
+      ASSERT_OK_AND_ASSIGN(TypeParam inv,
+                           a_m.MultiplicativeInverseFast(modulus_params.get()));
+      Int product =
+          (a_m.Mul(inv, modulus_params.get())).ExportInt(modulus_params.get());
+      ASSERT_EQ(product, 1);
+    }
+  }
+}
+
 TYPED_TEST(MontgomeryTest, Serialization) {
   using Int = typename TypeParam::Int;
 
