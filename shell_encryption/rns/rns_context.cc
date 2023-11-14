@@ -74,6 +74,78 @@ absl::StatusOr<RnsContext<ModularInt>> RnsContext<ModularInt>::Create(
 }
 
 template <typename ModularInt>
+absl::StatusOr<RnsContext<ModularInt>>
+RnsContext<ModularInt>::CreateForBgvFiniteFieldEncoding(
+    int log_n, absl::Span<const typename ModularInt::Int> qs,
+    absl::Span<const typename ModularInt::Int> ps,
+    typename ModularInt::Int plaintext_modulus) {
+  // We currently only support finite fields of prime order. Furthermore,
+  // Montgomery int does not support modulus == 2, so we do not allow an even
+  // plaintext modulus.
+  if (plaintext_modulus % 2 == 0) {
+    return absl::InvalidArgumentError(
+        "`plaintext_modulus` cannot be an even number.");
+  }
+
+  // Generate a generic context with constants for all RingLWE schemes.
+  RLWE_ASSIGN_OR_RETURN(RnsContext<ModularInt> context,
+                        Create(log_n, qs, ps, plaintext_modulus));
+  // Generate plaintext parameters for finite field encoding.
+  RLWE_RETURN_IF_ERROR(
+      context.GeneratePlaintextModulusConstantsForFiniteFieldEncoding());
+  return context;
+}
+
+template <typename ModularInt>
+absl::StatusOr<RnsContext<ModularInt>> RnsContext<ModularInt>::CreateForBfv(
+    int log_n, absl::Span<const typename ModularInt::Int> qs,
+    absl::Span<const typename ModularInt::Int> ps,
+    typename ModularInt::Int plaintext_modulus) {
+  // Generate a generic context with constants for all RingLWE schemes.
+  RLWE_ASSIGN_OR_RETURN(RnsContext<ModularInt> context,
+                        Create(log_n, qs, ps, plaintext_modulus));
+
+  // Create Montgomery parameters for the plaintext modulus. We wrap it inside
+  // the data member `modulus_t` with an empty NTT parameter.
+  RLWE_ASSIGN_OR_RETURN(std::unique_ptr<const ModularIntParams> mod_params_t,
+                        ModularInt::Params::Create(plaintext_modulus));
+  context.modulus_t_ = PrimeModulus<ModularInt>{
+      .mod_params = std::move(mod_params_t),
+  };
+
+  // Generate BFV specific plaintext modulus related constants.
+  RLWE_RETURN_IF_ERROR(context.GeneratePlaintextModulusConstantsForBfv());
+  return context;
+}
+
+template <typename ModularInt>
+absl::StatusOr<RnsContext<ModularInt>>
+RnsContext<ModularInt>::CreateForBfvFiniteFieldEncoding(
+    int log_n, absl::Span<const typename ModularInt::Int> qs,
+    absl::Span<const typename ModularInt::Int> ps,
+    typename ModularInt::Int plaintext_modulus) {
+  // We currently only support finite fields of prime order. Furthermore,
+  // Montgomery int does not support modulus == 2, so we do not allow an even
+  // plaintext modulus.
+  if (plaintext_modulus % 2 == 0) {
+    return absl::InvalidArgumentError(
+        "`plaintext_modulus` cannot be an even number.");
+  }
+
+  // Generate a generic context with constants for all RingLWE schemes.
+  RLWE_ASSIGN_OR_RETURN(RnsContext<ModularInt> context,
+                        Create(log_n, qs, ps, plaintext_modulus));
+
+  // Generate Montgomery and NTT parameters for finite field encoding.
+  RLWE_RETURN_IF_ERROR(
+      context.GeneratePlaintextModulusConstantsForFiniteFieldEncoding());
+
+  // Generate BFV specific plaintext modulus related constants.
+  RLWE_RETURN_IF_ERROR(context.GeneratePlaintextModulusConstantsForBfv());
+  return context;
+}
+
+template <typename ModularInt>
 absl::Status RnsContext<ModularInt>::GenerateCrtConstantsForMainModulus() {
   // Computes q_i and q_i^(-1) (mod q_j) for all main moduli q_i, q_j.
   prime_qs_.reserve(modulus_qs_.size());
@@ -100,6 +172,39 @@ absl::Status RnsContext<ModularInt>::GenerateCrtConstantsForMainModulus() {
     }
     prime_qs_.push_back({std::move(qi_mod_qs)});
     prime_q_invs_.push_back({std::move(qi_inv_mod_qs)});
+  }
+
+  // Computes q_j^(-1) mod p_i for all q_j, p_i.
+  prime_q_inv_mod_ps_.reserve(modulus_ps_.size());
+  for (int i = 0; i < modulus_ps_.size(); ++i) {
+    const ModularIntParams* params_pi = modulus_ps_[i]->ModParams();
+    std::vector<ModularInt> q_invs_mod_pi;
+    q_invs_mod_pi.reserve(modulus_qs_.size());
+    for (int j = 0; j < modulus_qs_.size(); ++j) {
+      RLWE_ASSIGN_OR_RETURN(
+          ModularInt qj_mod_pi,
+          ModularInt::ImportInt(modulus_qs_[j]->Modulus(), params_pi));
+      q_invs_mod_pi.push_back(qj_mod_pi.MultiplicativeInverse(params_pi));
+    }
+    prime_q_inv_mod_ps_.push_back({std::move(q_invs_mod_pi)});
+  }
+
+  // Computes [Q_l mod p_j for all j] for all l = 0 .. L.
+  leveled_q_mod_ps_.reserve(modulus_qs_.size());
+  std::vector<ModularInt> ql_mod_ps;
+  ql_mod_ps.reserve(modulus_ps_.size());
+  for (int j = 0; j < modulus_ps_.size(); ++j) {
+    ql_mod_ps.push_back(ModularInt::ImportOne(modulus_ps_[j]->ModParams()));
+  }
+  for (int l = 0; l < modulus_qs_.size(); ++l) {
+    for (int j = 0; j < modulus_ps_.size(); ++j) {
+      const ModularIntParams* mod_params_pj = modulus_ps_[j]->ModParams();
+      RLWE_ASSIGN_OR_RETURN(
+          ModularInt ql_mod_pj,
+          ModularInt::ImportInt(modulus_qs_[l]->Modulus(), mod_params_pj));
+      ql_mod_ps[j].MulInPlace(ql_mod_pj, mod_params_pj);
+    }
+    leveled_q_mod_ps_.push_back({ql_mod_ps});
   }
 
   return absl::OkStatus();
@@ -163,7 +268,7 @@ RnsContext<ModularInt>::MainPrimeModulusComplementResidues(int level) const {
         "`level` must be non-negative and at most ", modulus_qs_.size() - 1));
   }
 
-  // Compute Q_l / q_i (mod P) = [(Q_L / q_i) (mod p_j) for all j].
+  // Compute Q_l / q_i (mod P) = [(Q_l / q_i) (mod p_j) for all j].
   std::vector<RnsInt<ModularInt>> prime_q_hat_mod_ps;
   prime_q_hat_mod_ps.reserve(level + 1);
   for (int i = 0; i <= level; ++i) {
@@ -250,18 +355,28 @@ absl::Status RnsContext<ModularInt>::GenerateCrtConstantsForAuxModulus() {
 
 template <typename ModularInt>
 absl::Status RnsContext<ModularInt>::GeneratePlaintextModulusConstants() {
-  // Computes P (mod t) over the big integer type rather than Montgomery Int
+  // Computes Q (mod t) over the big integer type rather than Montgomery Int
   // to allow an even t.
   using BigInt = typename ModularInt::BigInt;
-  BigInt p_rem{1};
   BigInt t_big = static_cast<BigInt>(plaintext_modulus_);
+  BigInt q_rem{1};
+  for (auto const& modulus_q : modulus_qs_) {
+    q_rem *= static_cast<BigInt>(modulus_q->Modulus());
+    q_rem %= t_big;
+  }
+  q_mod_t_ = static_cast<typename ModularInt::Int>(q_rem);
+
+  // Computes P (mod t) over the big integer type rather than Montgomery Int
+  // to allow an even t.
+  BigInt p_rem{1};
   for (auto const& modulus_p : modulus_ps_) {
     p_rem *= static_cast<BigInt>(modulus_p->Modulus());
     p_rem %= t_big;
   }
   p_mod_t_ = static_cast<typename ModularInt::Int>(p_rem);
 
-  // Computes t^(-1) (mod q_i).
+  // Computes t (mod q_i) and t^(-1) (mod q_i).
+  t_mod_qs_.reserve(modulus_qs_.size());
   t_inv_mod_qs_.reserve(modulus_qs_.size());
   for (int i = 0; i < modulus_qs_.size(); ++i) {
     const ModularIntParams* mod_params_qi = modulus_qs_[i]->ModParams();
@@ -269,6 +384,7 @@ absl::Status RnsContext<ModularInt>::GeneratePlaintextModulusConstants() {
         ModularInt t_mod_qi,
         ModularInt::ImportInt(plaintext_modulus_, mod_params_qi));
     t_inv_mod_qs_.push_back(t_mod_qi.MultiplicativeInverse(mod_params_qi));
+    t_mod_qs_.push_back(std::move(t_mod_qi));
   }
 
   // Computes t^(-1) (mod p_j).
@@ -279,6 +395,46 @@ absl::Status RnsContext<ModularInt>::GeneratePlaintextModulusConstants() {
         ModularInt t_mod_pj,
         ModularInt::ImportInt(plaintext_modulus_, mod_params_pj));
     t_inv_mod_ps_.push_back(t_mod_pj.MultiplicativeInverse(mod_params_pj));
+  }
+  return absl::OkStatus();
+}
+
+template <typename ModularInt>
+absl::Status RnsContext<
+    ModularInt>::GeneratePlaintextModulusConstantsForFiniteFieldEncoding() {
+  // Create Montgomery and NTT parameters for the plaintext modulus.
+  RLWE_ASSIGN_OR_RETURN(std::unique_ptr<const ModularIntParams> mod_params_t,
+                        ModularInt::Params::Create(plaintext_modulus_));
+  RLWE_ASSIGN_OR_RETURN(
+      NttParameters<ModularInt> ntt_params_t,
+      rlwe::InitializeNttParameters<ModularInt>(log_n_, mod_params_t.get()));
+  auto ntt_params_t_ptr = std::make_unique<const NttParameters<ModularInt>>(
+      std::move(ntt_params_t));
+  modulus_t_ = PrimeModulus<ModularInt>{std::move(mod_params_t),
+                                        std::move(ntt_params_t_ptr)};
+  return absl::OkStatus();
+}
+
+template <typename ModularInt>
+absl::Status RnsContext<ModularInt>::GeneratePlaintextModulusConstantsForBfv() {
+  const ModularIntParams* mod_params_t = modulus_t_.ModParams();
+
+  qs_mod_t_.reserve(modulus_qs_.size());
+  q_invs_mod_t_.reserve(modulus_qs_.size());
+  ql_invs_mod_t_.reserve(modulus_qs_.size());
+  ModularInt ql_inv_mod_t = ModularInt::ImportOne(mod_params_t);
+  for (int i = 0; i < modulus_qs_.size(); ++i) {
+    const ModularIntParams* mod_params_qi = modulus_qs_[i]->ModParams();
+    RLWE_ASSIGN_OR_RETURN(
+        ModularInt qi_mod_t,
+        ModularInt::ImportInt(mod_params_qi->modulus % plaintext_modulus_,
+                              mod_params_t));
+    RLWE_ASSIGN_OR_RETURN(ModularInt qi_inv_mod_t,
+                          qi_mod_t.MultiplicativeInverseFast(mod_params_t));
+    ql_inv_mod_t.MulInPlace(qi_inv_mod_t, mod_params_t);
+    ql_invs_mod_t_.push_back(ql_inv_mod_t);
+    q_invs_mod_t_.push_back(std::move(qi_inv_mod_t));
+    qs_mod_t_.push_back(std::move(qi_mod_t));
   }
   return absl::OkStatus();
 }

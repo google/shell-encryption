@@ -64,6 +64,29 @@ class RnsContext {
       absl::Span<const typename ModularInt::Int> ps,
       typename ModularInt::Int plaintext_modulus);
 
+  // Creates a RnsContext suitable for using the finite field encoder with BGV
+  // scheme, with main prime moduli `qs`, auxiliary prime moduli `ps`, and a
+  // plaintext modulus.
+  static absl::StatusOr<RnsContext> CreateForBgvFiniteFieldEncoding(
+      int log_n, absl::Span<const typename ModularInt::Int> qs,
+      absl::Span<const typename ModularInt::Int> ps,
+      typename ModularInt::Int plaintext_modulus);
+
+  // Creates a RnsContext suitable for instantiating the BFV scheme, with main
+  // prime moduli `qs`, auxiliary prime moduli `ps`, and a plaintext modulus.
+  static absl::StatusOr<RnsContext> CreateForBfv(
+      int log_n, absl::Span<const typename ModularInt::Int> qs,
+      absl::Span<const typename ModularInt::Int> ps,
+      typename ModularInt::Int plaintext_modulus);
+
+  // Creates a RnsContext suitable for using the finite field encoder with BFV
+  // scheme, with main prime moduli `qs`, auxiliary prime moduli `ps`, and a
+  // plaintext modulus.
+  static absl::StatusOr<RnsContext> CreateForBfvFiniteFieldEncoding(
+      int log_n, absl::Span<const typename ModularInt::Int> qs,
+      absl::Span<const typename ModularInt::Int> ps,
+      typename ModularInt::Int plaintext_modulus);
+
   // Returns the log of the dimension N.
   int LogN() const { return log_n_; }
 
@@ -96,16 +119,41 @@ class RnsContext {
     return plaintext_modulus_;
   }
 
+  // Returns the parameters (Montgomery integer and NTT) for the plaintext
+  // modulus t.
+  // Note that the Montgomery parameters is defined only when this context is
+  // created for BFV scheme, and the NTT parameters is defined only when this
+  // is created for using finite field encoding.
+  const PrimeModulus<ModularInt>& PlaintextModulusParams() const {
+    return modulus_t_;
+  }
+
   // The i'th entry is q_i (mod Q) = (q_i (mod q_j) for all j).
   absl::Span<const RnsInt<ModularInt>> MainPrimeModulusResidues() const {
     return prime_qs_;
   }
 
-  // The i'th entry is q_i^(-1) (mod Q) = (q_i^(-1) (mod q_i) for all j).
+  // The i'th entry is q_i^(-1) (mod Q) = (q_i^(-1) (mod q_j) for all j).
   // Note that q_i does not have an inverse modulo q_i itself, so we use 1 as
   // a placeholder.
   absl::Span<const RnsInt<ModularInt>> MainPrimeModulusInverseResidues() const {
     return prime_q_invs_;
+  }
+
+  // The i'th entry is Q^(-1) (mod p_i) = (q_j^(-1) (mod p_i) for all j).
+  absl::Span<const RnsInt<ModularInt>> MainPrimeModulusInverseAuxResidues()
+      const {
+    return prime_q_inv_mod_ps_;
+  }
+
+  // The l'th entry is [Q_l (mod p_j) = \prod_{i=0}^l q_i (mod p_j) for all j].
+  absl::StatusOr<RnsInt<ModularInt>> MainLeveledModulusAuxResidues(
+      int level) const {
+    if (level < 0 || level >= modulus_qs_.size()) {
+      return absl::InvalidArgumentError(absl::StrCat(
+          "`level` must be non-negative and at most ", modulus_qs_.size() - 1));
+    }
+    return leveled_q_mod_ps_[level];
   }
 
   // The i'th entry is \hat{Q}_{l,i} = Q_l / q_i (mod q_i), where Q_l = q_0 * ..
@@ -119,7 +167,7 @@ class RnsContext {
   absl::StatusOr<std::vector<ModularInt>> MainPrimeModulusCrtFactors(
       int level) const;
 
-  // The i'th entry is \hat{Q}_{l,i} (mod P) = ((Q_l/q_j) (mod p_j) for all j).
+  // The i'th entry is \hat{Q}_{l,i} (mod P) = ((Q_l/q_i) (mod p_j) for all j).
   absl::StatusOr<std::vector<RnsInt<ModularInt>>>
   MainPrimeModulusComplementResidues(int level) const;
 
@@ -143,9 +191,19 @@ class RnsContext {
     return p_inv_mod_qs_;
   }
 
-  // Return the residue of P (mod t), where t is the plaintext modulus.
+  // Returns the residue of Q (mod t), where t is the plaintext modulus.
+  typename ModularInt::Int MainModulusPlaintextResidue() const {
+    return q_mod_t_;
+  }
+
+  // Returns the residue of P (mod t), where t is the plaintext modulus.
   typename ModularInt::Int AuxModulusPlaintextResidue() const {
     return p_mod_t_;
+  }
+
+  // The i'th entry is t (mod q_i).
+  absl::Span<const ModularInt> PlaintextModulusMainResidues() const {
+    return t_mod_qs_;
   }
 
   // The i'th entry is t^(-1) (mod q_i).
@@ -156,6 +214,23 @@ class RnsContext {
   // The j'th entry is t^(-1) (mod p_j).
   absl::Span<const ModularInt> PlaintextModulusInverseAuxResidues() const {
     return t_inv_mod_ps_;
+  }
+
+  // The i'th entry is q_i (mod t).
+  absl::Span<const ModularInt> MainPrimeModulusPlaintextResidues() const {
+    return qs_mod_t_;
+  }
+
+  // The i'th entry is q_i^(-1) (mod t).
+  absl::Span<const ModularInt> MainPrimeModulusInversePlaintextResidues()
+      const {
+    return q_invs_mod_t_;
+  }
+
+  // The l'th entry is Q_l^(-1) (mod t) = \prod_{i=0}^l q_i^(-1) (mod t).
+  absl::Span<const ModularInt> MainLeveledModulusInversePlaintextResidue()
+      const {
+    return ql_invs_mod_t_;
   }
 
  private:
@@ -173,6 +248,8 @@ class RnsContext {
   absl::Status GenerateCrtConstantsForMainModulus();
   absl::Status GenerateCrtConstantsForAuxModulus();
   absl::Status GeneratePlaintextModulusConstants();
+  absl::Status GeneratePlaintextModulusConstantsForFiniteFieldEncoding();
+  absl::Status GeneratePlaintextModulusConstantsForBfv();
 
   int log_n_;
 
@@ -185,11 +262,20 @@ class RnsContext {
   // Plaintext modulus t.
   typename ModularInt::Int plaintext_modulus_;
 
+  // Montgomery and (optional) NTT parameters for the plaintext modulus t.
+  PrimeModulus<ModularInt> modulus_t_;
+
   // The entry [i] is q_i (mod Q) = [q_i (mod q_j) for all j].
   std::vector<RnsInt<ModularInt>> prime_qs_;
 
   // The entry [i] is q_i^(-1) (mod Q) = [q_i^(-1) (mod q_j) for all j].
   std::vector<RnsInt<ModularInt>> prime_q_invs_;
+
+  // The entry [i] is Q^(-1) (mod p_i), stored as [q_j^-1 (mod p_i) for all j].
+  std::vector<RnsInt<ModularInt>> prime_q_inv_mod_ps_;
+
+  // The entry [l] is [Q_l (mod p_j) = \prod_{i=0}^l q_i (mod p_j) for all j].
+  std::vector<RnsInt<ModularInt>> leveled_q_mod_ps_;
 
   // The entry [i] is \hat{p}_i^(-1) = (P / p_i)^(-1) (mod p_i).
   std::vector<ModularInt> prime_p_hat_invs_;
@@ -203,14 +289,29 @@ class RnsContext {
   // The entry [i] is P^(-1) (mod q_i).
   std::vector<ModularInt> p_inv_mod_qs_;
 
+  // The residue of Q (mod t).
+  typename ModularInt::Int q_mod_t_;
+
   // The residue of P (mod t).
   typename ModularInt::Int p_mod_t_;
+
+  // The entry [i] is t (mod q_i).
+  std::vector<ModularInt> t_mod_qs_;
 
   // The entry [i] is t^(-1) (mod q_i).
   std::vector<ModularInt> t_inv_mod_qs_;
 
   // The entry [i] is t^(-1) (mod p_i).
   std::vector<ModularInt> t_inv_mod_ps_;
+
+  // The entry [i] is q_i (mod t).
+  std::vector<ModularInt> qs_mod_t_;
+
+  // The entry [i] is q_i^(-1) (mod t).
+  std::vector<ModularInt> q_invs_mod_t_;
+
+  // The entry [i] is Q_l^(-1) (mod t) = \prod_{j=0}^l q_j^(-1) (mod t).
+  std::vector<ModularInt> ql_invs_mod_t_;
 };
 
 }  // namespace rlwe

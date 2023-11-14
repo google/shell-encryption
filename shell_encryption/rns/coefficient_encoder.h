@@ -16,20 +16,19 @@
 #ifndef RLWE_RNS_COEFFICIENT_ENCODER_H_
 #define RLWE_RNS_COEFFICIENT_ENCODER_H_
 
-#include <utility>
 #include <vector>
 
-#include "absl/status/status.h"
+#include "absl/status/statusor.h"
 #include "absl/types/span.h"
-#include "shell_encryption/montgomery.h"
 #include "shell_encryption/rns/rns_context.h"
+#include "shell_encryption/rns/rns_modulus.h"
 #include "shell_encryption/rns/rns_polynomial.h"
 
 namespace rlwe {
 
 // This class specifies how to encode messages in Z_t^N as a polynomial
 // in Z[X]/(Q, X^N+1), where t is the plaintext modulus and Q is the ciphertext
-// modulus. This implements the coefficient encoding scheme in BGV.
+// modulus. This implements the coefficient encoding for both BGV and BFV.
 template <typename ModularInt>
 class CoefficientEncoder {
  public:
@@ -57,11 +56,30 @@ class CoefficientEncoder {
       RnsPolynomial<ModularInt> noisy_plaintext,
       absl::Span<const PrimeModulus<ModularInt>* const> moduli) const;
 
+  // Returns a polynomial (in NTT form) whose coefficients encode `messages`.
+  // When `is_scaled` is set, this encoding method can be used in BFV scheme to
+  // encrypt `messages`. When `is_scaled` is set to false, this encoding method
+  // produces a plaintext polynomial suitable for ciphertext-plaintext
+  // multiplication in BFV.
+  absl::StatusOr<RnsPolynomial<ModularInt>> EncodeBfv(
+      absl::Span<const Integer> messages,
+      absl::Span<const PrimeModulus<ModularInt>* const> moduli,
+      bool is_scaled = true) const;
+
+  // Returns the messages encoded in the most significant bits of coefficients
+  // of `noisy_plaintext`.
+  absl::StatusOr<std::vector<Integer>> DecodeBfv(
+      RnsPolynomial<ModularInt> noisy_plaintext,
+      absl::Span<const PrimeModulus<ModularInt>* const> moduli) const;
+
   // Accessors
   int LogN() const { return context_->LogN(); }
 
   // The plaintext modulus.
   Integer PlaintextModulus() const { return context_->PlaintextModulus(); }
+
+  // The underlying RNS context.
+  const RnsContext<ModularInt>* Context() const { return context_; }
 
  private:
   explicit CoefficientEncoder(const RnsContext<ModularInt>* context)

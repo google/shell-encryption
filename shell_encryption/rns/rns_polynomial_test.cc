@@ -15,6 +15,8 @@
 
 #include "shell_encryption/rns/rns_polynomial.h"
 
+#include <cmath>
+#include <cstddef>
 #include <memory>
 #include <utility>
 #include <vector>
@@ -32,6 +34,7 @@
 #include "shell_encryption/rns/rns_context.h"
 #include "shell_encryption/rns/rns_modulus.h"
 #include "shell_encryption/rns/testing/parameters.h"
+#include "shell_encryption/rns/testing/testing_utils.h"
 #include "shell_encryption/status_macros.h"
 #include "shell_encryption/testing/parameters.h"
 #include "shell_encryption/testing/status_matchers.h"
@@ -1437,6 +1440,374 @@ TYPED_TEST(RnsPolynomialTest, ModReduceMsbIsCorrect) {
   EXPECT_EQ(c, b);
 }
 
+TYPED_TEST(RnsPolynomialTest, ExactSwitchRnsBasisFailsIfPolynomialIsInNttForm) {
+  int level = this->moduli_.size() - 1;
+  ASSERT_GE(level, 0);
+  ASSERT_OK_AND_ASSIGN(
+      auto a, RnsPolynomial<TypeParam>::CreateZero(
+                  this->rns_context_->LogN(), this->moduli_, /*is_ntt=*/true));
+
+  ASSERT_OK_AND_ASSIGN(auto q_hat_inv_mod_qs,
+                       this->rns_context_->MainPrimeModulusCrtFactors(level));
+  ASSERT_OK_AND_ASSIGN(
+      auto q_hat_mod_ps,
+      this->rns_context_->MainPrimeModulusComplementResidues(level));
+  ASSERT_OK_AND_ASSIGN(
+      auto q_mod_ps, this->rns_context_->MainLeveledModulusAuxResidues(level));
+  EXPECT_THAT(
+      a.SwitchRnsBasis(this->moduli_, this->rns_context_->AuxPrimeModuli(),
+                       q_hat_inv_mod_qs, q_hat_mod_ps, q_mod_ps.RnsRep()),
+      StatusIs(absl::StatusCode::kInvalidArgument,
+               HasSubstr("Polynomial must be in coefficient form")));
+}
+
+TYPED_TEST(RnsPolynomialTest, ExactSwitchRnsBasisFailsIfWrongNumberOfModuli) {
+  int level = this->moduli_.size() - 1;
+  ASSERT_GE(level, 0);
+  ASSERT_OK_AND_ASSIGN(
+      auto a, RnsPolynomial<TypeParam>::CreateZero(
+                  this->rns_context_->LogN(), this->moduli_, /*is_ntt=*/false));
+
+  ASSERT_OK_AND_ASSIGN(auto q_hat_inv_mod_qs,
+                       this->rns_context_->MainPrimeModulusCrtFactors(level));
+  ASSERT_OK_AND_ASSIGN(
+      auto q_hat_mod_ps,
+      this->rns_context_->MainPrimeModulusComplementResidues(level));
+  ASSERT_OK_AND_ASSIGN(
+      auto q_mod_ps, this->rns_context_->MainLeveledModulusAuxResidues(level));
+  EXPECT_THAT(
+      a.SwitchRnsBasis(absl::MakeSpan(this->moduli_).subspan(0, level),
+                       this->rns_context_->AuxPrimeModuli(), q_hat_inv_mod_qs,
+                       q_hat_mod_ps, q_mod_ps.RnsRep()),
+      StatusIs(absl::StatusCode::kInvalidArgument,
+               HasSubstr(absl::StrCat("`this_moduli` must contain ",
+                                      this->moduli_.size(), " RNS moduli"))));
+}
+
+TYPED_TEST(RnsPolynomialTest, ExactSwitchRnsBasisFailsIfEmptyOutputModuli) {
+  int level = this->moduli_.size() - 1;
+  ASSERT_GE(level, 0);
+  ASSERT_OK_AND_ASSIGN(
+      auto a, RnsPolynomial<TypeParam>::CreateZero(
+                  this->rns_context_->LogN(), this->moduli_, /*is_ntt=*/false));
+
+  ASSERT_OK_AND_ASSIGN(auto q_hat_inv_mod_qs,
+                       this->rns_context_->MainPrimeModulusCrtFactors(level));
+  ASSERT_OK_AND_ASSIGN(
+      auto q_hat_mod_ps,
+      this->rns_context_->MainPrimeModulusComplementResidues(level));
+  ASSERT_OK_AND_ASSIGN(
+      auto q_mod_ps, this->rns_context_->MainLeveledModulusAuxResidues(level));
+  EXPECT_THAT(a.SwitchRnsBasis(this->moduli_,
+                               /*output_moduli=*/{}, q_hat_inv_mod_qs,
+                               q_hat_mod_ps, q_mod_ps.RnsRep()),
+              StatusIs(absl::StatusCode::kInvalidArgument,
+                       HasSubstr("`output_moduli` must not be empty")));
+}
+
+TYPED_TEST(RnsPolynomialTest,
+           ExactSwitchRnsBasisFailsIfWrongLevelForQHatInvModQs) {
+  // This test requires the main moduli have at least two elements.
+  if (this->moduli_.size() <= 1) {
+    return;
+  }
+  int level = this->moduli_.size() - 1;
+  ASSERT_GE(level, 0);
+  ASSERT_OK_AND_ASSIGN(
+      auto a, RnsPolynomial<TypeParam>::CreateZero(
+                  this->rns_context_->LogN(), this->moduli_, /*is_ntt=*/false));
+
+  ASSERT_OK_AND_ASSIGN(
+      auto q_hat_inv_mod_qs_at_wrong_level,
+      this->rns_context_->MainPrimeModulusCrtFactors(level - 1));
+  ASSERT_OK_AND_ASSIGN(
+      auto q_hat_mod_ps,
+      this->rns_context_->MainPrimeModulusComplementResidues(level));
+  ASSERT_OK_AND_ASSIGN(
+      auto q_mod_ps, this->rns_context_->MainLeveledModulusAuxResidues(level));
+  EXPECT_THAT(
+      a.SwitchRnsBasis(this->moduli_, this->rns_context_->AuxPrimeModuli(),
+                       q_hat_inv_mod_qs_at_wrong_level, q_hat_mod_ps,
+                       q_mod_ps.RnsRep()),
+      StatusIs(absl::StatusCode::kInvalidArgument,
+               HasSubstr("`prime_q_hat_inv_mod_qs` must contain at least")));
+}
+
+TYPED_TEST(RnsPolynomialTest,
+           ExactSwitchRnsBasisFailsIfWrongLevelForQHatModPs) {
+  // This test requires the main moduli have at least two elements.
+  if (this->moduli_.size() <= 1) {
+    return;
+  }
+  int level = this->moduli_.size() - 1;
+  ASSERT_GE(level, 0);
+  ASSERT_OK_AND_ASSIGN(
+      auto a, RnsPolynomial<TypeParam>::CreateZero(
+                  this->rns_context_->LogN(), this->moduli_, /*is_ntt=*/false));
+
+  ASSERT_OK_AND_ASSIGN(auto q_hat_inv_mod_qs,
+                       this->rns_context_->MainPrimeModulusCrtFactors(level));
+  ASSERT_OK_AND_ASSIGN(
+      auto q_hat_mod_ps_at_wrong_level,
+      this->rns_context_->MainPrimeModulusComplementResidues(level - 1));
+  ASSERT_OK_AND_ASSIGN(
+      auto q_mod_ps, this->rns_context_->MainLeveledModulusAuxResidues(level));
+  EXPECT_THAT(
+      a.SwitchRnsBasis(this->moduli_, this->rns_context_->AuxPrimeModuli(),
+                       q_hat_inv_mod_qs, q_hat_mod_ps_at_wrong_level,
+                       q_mod_ps.RnsRep()),
+      StatusIs(absl::StatusCode::kInvalidArgument,
+               HasSubstr("`prime_q_hat_mod_ps` must contain at least")));
+}
+
+TYPED_TEST(RnsPolynomialTest, ExactSwitchRnsBasisFailsIfWrongSizeForQModPs) {
+  int level = this->moduli_.size() - 1;
+  ASSERT_GE(level, 0);
+  ASSERT_OK_AND_ASSIGN(
+      auto a, RnsPolynomial<TypeParam>::CreateZero(
+                  this->rns_context_->LogN(), this->moduli_, /*is_ntt=*/false));
+
+  ASSERT_OK_AND_ASSIGN(auto q_hat_inv_mod_qs,
+                       this->rns_context_->MainPrimeModulusCrtFactors(level));
+  ASSERT_OK_AND_ASSIGN(
+      auto q_hat_mod_ps,
+      this->rns_context_->MainPrimeModulusComplementResidues(level));
+  ASSERT_OK_AND_ASSIGN(
+      auto q_mod_ps_wrong_size,
+      this->rns_context_->MainLeveledModulusAuxResidues(level));
+  q_mod_ps_wrong_size.zs.pop_back();
+  EXPECT_THAT(a.SwitchRnsBasis(
+                  this->moduli_, this->rns_context_->AuxPrimeModuli(),
+                  q_hat_inv_mod_qs, q_hat_mod_ps, q_mod_ps_wrong_size.RnsRep()),
+              StatusIs(absl::StatusCode::kInvalidArgument,
+                       HasSubstr("`q_mod_ps` must contain")));
+}
+
+TYPED_TEST(RnsPolynomialTest,
+           ScaleAndSwitchRnsBasisFailsIfPolynomialIsInNttForm) {
+  int level = this->moduli_.size() - 1;
+  ASSERT_GE(level, 0);
+  ASSERT_OK_AND_ASSIGN(
+      auto a, RnsPolynomial<TypeParam>::CreateZero(
+                  this->rns_context_->LogN(), this->moduli_, /*is_ntt=*/true));
+
+  ASSERT_OK_AND_ASSIGN(auto q_hat_inv_mod_qs,
+                       this->rns_context_->MainPrimeModulusCrtFactors(level));
+  EXPECT_THAT(
+      a.ScaleAndSwitchRnsBasis(
+          this->moduli_, this->rns_context_->AuxPrimeModuli(), q_hat_inv_mod_qs,
+          this->rns_context_->MainPrimeModulusInverseAuxResidues(),
+          this->rns_context_->AuxModulusResidues()),
+      StatusIs(absl::StatusCode::kInvalidArgument,
+               HasSubstr("Polynomial must be in coefficient form")));
+}
+
+TYPED_TEST(RnsPolynomialTest,
+           ScaleAndSwitchRnsBasisFailsIfWrongNumberOfModuli) {
+  int level = this->moduli_.size() - 1;
+  ASSERT_GE(level, 0);
+  ASSERT_OK_AND_ASSIGN(
+      auto a, RnsPolynomial<TypeParam>::CreateZero(
+                  this->rns_context_->LogN(), this->moduli_, /*is_ntt=*/false));
+
+  ASSERT_OK_AND_ASSIGN(auto q_hat_inv_mod_qs,
+                       this->rns_context_->MainPrimeModulusCrtFactors(level));
+  EXPECT_THAT(
+      a.ScaleAndSwitchRnsBasis(
+          absl::MakeSpan(this->moduli_).subspan(0, level),
+          this->rns_context_->AuxPrimeModuli(), q_hat_inv_mod_qs,
+          this->rns_context_->MainPrimeModulusInverseAuxResidues(),
+          this->rns_context_->AuxModulusResidues()),
+      StatusIs(absl::StatusCode::kInvalidArgument,
+               HasSubstr(absl::StrCat("`this_moduli` must contain ",
+                                      this->moduli_.size(), " RNS moduli"))));
+}
+
+TYPED_TEST(RnsPolynomialTest, ScaleAndSwitchRnsBasisFailsIfEmptyOutputModuli) {
+  int level = this->moduli_.size() - 1;
+  ASSERT_GE(level, 0);
+  ASSERT_OK_AND_ASSIGN(
+      auto a, RnsPolynomial<TypeParam>::CreateZero(
+                  this->rns_context_->LogN(), this->moduli_, /*is_ntt=*/false));
+
+  ASSERT_OK_AND_ASSIGN(auto q_hat_inv_mod_qs,
+                       this->rns_context_->MainPrimeModulusCrtFactors(level));
+  EXPECT_THAT(a.ScaleAndSwitchRnsBasis(
+                  this->moduli_,
+                  /*output_moduli=*/{}, q_hat_inv_mod_qs,
+                  this->rns_context_->MainPrimeModulusInverseAuxResidues(),
+                  this->rns_context_->AuxModulusResidues()),
+              StatusIs(absl::StatusCode::kInvalidArgument,
+                       HasSubstr("output_moduli` must not be empty")));
+}
+
+TYPED_TEST(RnsPolynomialTest,
+           ScaleAndSwitchRnsBasisFailsIfWrongLevelForQHatInvModQs) {
+  // This test requires at least two main prime moduli.
+  if (this->moduli_.size() <= 1) {
+    return;
+  }
+  int level = this->moduli_.size() - 1;
+  ASSERT_GE(level, 0);
+  ASSERT_OK_AND_ASSIGN(
+      auto a, RnsPolynomial<TypeParam>::CreateZero(
+                  this->rns_context_->LogN(), this->moduli_, /*is_ntt=*/false));
+
+  ASSERT_OK_AND_ASSIGN(
+      auto q_hat_inv_mod_qs_at_wrong_level,
+      this->rns_context_->MainPrimeModulusCrtFactors(level - 1));
+  EXPECT_THAT(
+      a.ScaleAndSwitchRnsBasis(
+          this->moduli_, this->rns_context_->AuxPrimeModuli(),
+          q_hat_inv_mod_qs_at_wrong_level,
+          this->rns_context_->MainPrimeModulusInverseAuxResidues(),
+          this->rns_context_->AuxModulusResidues()),
+      StatusIs(absl::StatusCode::kInvalidArgument,
+               HasSubstr("`prime_q_hat_inv_mod_qs` must contain at least")));
+}
+
+TYPED_TEST(RnsPolynomialTest,
+           ScaleAndSwitchRnsBasisFailsIfWrongSizeForQInvModPs) {
+  int level = this->moduli_.size() - 1;
+  ASSERT_GE(level, 0);
+  ASSERT_OK_AND_ASSIGN(
+      auto a, RnsPolynomial<TypeParam>::CreateZero(
+                  this->rns_context_->LogN(), this->moduli_, /*is_ntt=*/false));
+
+  ASSERT_OK_AND_ASSIGN(auto q_hat_inv_mod_qs,
+                       this->rns_context_->MainPrimeModulusCrtFactors(level));
+  int num_aux_moduli = this->rns_context_->AuxPrimeModuli().size();
+  auto q_inv_mod_ps_wrong_size =
+      this->rns_context_->MainPrimeModulusInverseAuxResidues().subspan(
+          0, num_aux_moduli - 1);
+  EXPECT_THAT(
+      a.ScaleAndSwitchRnsBasis(
+          this->moduli_, this->rns_context_->AuxPrimeModuli(), q_hat_inv_mod_qs,
+          q_inv_mod_ps_wrong_size, this->rns_context_->AuxModulusResidues()),
+      StatusIs(absl::StatusCode::kInvalidArgument,
+               HasSubstr("`prime_q_inv_mod_ps` must contain")));
+}
+
+TYPED_TEST(RnsPolynomialTest,
+           ScaleAndSwitchRnsBasisFailsIfWrongLevelForPModQs) {
+  // This test requires at least two main prime moduli.
+  if (this->moduli_.size() <= 1) {
+    return;
+  }
+  int level = this->moduli_.size() - 1;
+  ASSERT_GE(level, 0);
+  ASSERT_OK_AND_ASSIGN(
+      auto a, RnsPolynomial<TypeParam>::CreateZero(
+                  this->rns_context_->LogN(), this->moduli_, /*is_ntt=*/false));
+
+  ASSERT_OK_AND_ASSIGN(auto q_hat_inv_mod_qs,
+                       this->rns_context_->MainPrimeModulusCrtFactors(level));
+  auto p_mod_qs_at_wrong_level =
+      this->rns_context_->AuxModulusResidues().subspan(0, level);
+  EXPECT_THAT(
+      a.ScaleAndSwitchRnsBasis(
+          this->moduli_, this->rns_context_->AuxPrimeModuli(), q_hat_inv_mod_qs,
+          this->rns_context_->MainPrimeModulusInverseAuxResidues(),
+          p_mod_qs_at_wrong_level),
+      StatusIs(absl::StatusCode::kInvalidArgument,
+               HasSubstr("`p_mod_qs` must contain at least")));
+}
+
+TYPED_TEST(RnsPolynomialTest, ScaleAndSwitchRnsBasisToSmallerModulus) {
+  using Integer = typename TypeParam::Int;
+  using ModularIntParams = typename TypeParam::Params;
+
+  constexpr Integer t = 517;
+
+  ASSERT_OK_AND_ASSIGN(std::unique_ptr<const ModularIntParams> params_t,
+                       TypeParam::Params::Create(t));
+  auto modulus_t =
+      absl::WrapUnique(new PrimeModulus<TypeParam>{std::move(params_t),
+                                                   /*ntt_params=*/nullptr});
+  std::vector<const PrimeModulus<TypeParam>*> output_moduli = {modulus_t.get()};
+  std::vector<const PrimeModulus<TypeParam>*> main_moduli = this->moduli_;
+  std::vector<TypeParam> qs_mod_t;      // {q_i mod t}
+  std::vector<TypeParam> q_invs_mod_t;  // {q_i^(-1) mod t}
+  std::vector<TypeParam> t_mod_qs;      // {t mod q_i}
+  std::vector<TypeParam> t_inv_mod_qs;  // {t^(-1) mod q_i}
+  for (int i = 0; i < main_moduli.size(); ++i) {
+    auto mod_params_qi = main_moduli[i]->ModParams();
+    ASSERT_OK_AND_ASSIGN(
+        TypeParam qi_mod_t,
+        TypeParam::ImportInt(mod_params_qi->modulus, modulus_t->ModParams()));
+    ASSERT_OK_AND_ASSIGN(
+        TypeParam qi_inv_mod_t,
+        qi_mod_t.MultiplicativeInverseFast(modulus_t->ModParams()));
+    q_invs_mod_t.push_back(std::move(qi_inv_mod_t));
+    qs_mod_t.push_back(std::move(qi_mod_t));
+
+    ASSERT_OK_AND_ASSIGN(TypeParam t_mod_qi,
+                         TypeParam::ImportInt(t, mod_params_qi));
+    t_inv_mod_qs.push_back(t_mod_qi.MultiplicativeInverse(mod_params_qi));
+    t_mod_qs.push_back(std::move(t_mod_qi));
+  }
+
+  // Sample random values v mod t.
+  int log_n = this->rns_context_->LogN();
+  ASSERT_OK_AND_ASSIGN(std::vector<TypeParam> v_mod_t,
+                       this->SampleCoeffs(log_n, modulus_t->ModParams(),
+                                          static_cast<Uint64>(t)));
+  // Encode v (mod t) to a = ([-Q * a] mod t) / t (mod Q).
+  std::vector<TypeParam> scaled_v_mod_t = v_mod_t;
+  for (int i = 0; i < main_moduli.size(); ++i) {
+    ASSERT_OK(TypeParam::BatchMulInPlace(&scaled_v_mod_t, qs_mod_t[i],
+                                         modulus_t->ModParams()));
+  }
+  for (int i = 0; i < scaled_v_mod_t.size(); ++i) {
+    scaled_v_mod_t[i].NegateInPlace(modulus_t->ModParams());
+  }
+  ASSERT_OK_AND_ASSIGN(
+      RnsPolynomial<TypeParam> a,
+      RnsPolynomial<TypeParam>::ConvertFromPolynomialCoeffs(
+          scaled_v_mod_t, modulus_t->ModParams(), main_moduli));
+  ASSERT_OK(a.ConvertToCoeffForm(main_moduli));
+  ASSERT_OK(a.MulInPlace(t_inv_mod_qs, main_moduli));
+
+  // Compute round(t / Q * a(X)) mod t.
+  int level = main_moduli.size() - 1;
+  ASSERT_OK_AND_ASSIGN(std::vector<TypeParam> q_hat_inv_mod_qs,
+                       this->rns_context_->MainPrimeModulusCrtFactors(level));
+  RnsInt<TypeParam> q_inv_mod_t{std::move(q_invs_mod_t)};
+  ASSERT_OK_AND_ASSIGN(
+      RnsPolynomial<TypeParam> b,
+      a.ScaleAndSwitchRnsBasis(main_moduli, output_moduli, q_hat_inv_mod_qs,
+                               {q_inv_mod_t}, t_mod_qs));
+  EXPECT_EQ(b.NumModuli(), output_moduli.size());
+
+  for (int i = 0; i < (1 << log_n); ++i) {
+    Integer expected = v_mod_t[i].ExportInt(modulus_t->ModParams());
+    Integer actual = b.Coeffs()[0][i].ExportInt(modulus_t->ModParams());
+    EXPECT_EQ(actual, expected);
+  }
+}
+
+TYPED_TEST(RnsPolynomialTest, ExtendRnsBasisInPlaceHasCorrectModuliSize) {
+  // Sample a random polynomial mod Q.
+  ASSERT_OK_AND_ASSIGN(RnsPolynomial<TypeParam> a,
+                       this->SampleRnsPolynomial(this->moduli_));
+  ASSERT_OK(a.ConvertToCoeffForm(this->moduli_));
+
+  // Extend a (mod Q) to a (mod Q*P).
+  int level = this->moduli_.size() - 1;
+  ASSERT_OK_AND_ASSIGN(std::vector<TypeParam> q_hat_inv_mod_qs,
+                       this->rns_context_->MainPrimeModulusCrtFactors(level));
+  ASSERT_OK_AND_ASSIGN(
+      std::vector<RnsInt<TypeParam>> q_hat_mod_ps,
+      this->rns_context_->MainPrimeModulusComplementResidues(level));
+  std::vector<const PrimeModulus<TypeParam>*> aux_moduli =
+      this->rns_context_->AuxPrimeModuli();
+  ASSERT_OK_AND_ASSIGN(
+      auto q_mod_ps, this->rns_context_->MainLeveledModulusAuxResidues(level));
+  ASSERT_OK(a.ExtendRnsBasisInPlace(this->moduli_, aux_moduli, q_hat_inv_mod_qs,
+                                    q_hat_mod_ps, q_mod_ps.RnsRep()));
+  EXPECT_EQ(a.NumModuli(), this->moduli_.size() + aux_moduli.size());
+}
+
 TYPED_TEST(RnsPolynomialTest, ApproxSwitchRnsBasisFailsIfWrongNumberOfModuli) {
   int level = this->moduli_.size() - 1;
   ASSERT_GE(level, 0);
@@ -1565,7 +1936,8 @@ TYPED_TEST(RnsPolynomialTest, ApproxSwitchRnsBasisIsCorrect) {
   ASSERT_OK_AND_ASSIGN(RnsPolynomial<TypeParam> b,
                        a.ApproxSwitchRnsBasis(main_moduli, aux_moduli,
                                               q_hat_inv_mod_qs, q_hat_mod_ps));
-  EXPECT_EQ(b.NumModuli(), aux_moduli.size());
+  ASSERT_EQ(b.NumModuli(), aux_moduli.size());
+  ASSERT_FALSE(b.IsNttForm());
 
   // Compute CRT interpolation of the RNS polynomial a.
   ASSERT_OK(a.ConvertToCoeffForm(main_moduli));
@@ -1577,7 +1949,6 @@ TYPED_TEST(RnsPolynomialTest, ApproxSwitchRnsBasisIsCorrect) {
                            a.Coeffs(), main_moduli, q_hats, q_hat_invs)));
 
   // Compute CRT interpolation of the RNS polynomial b.
-  ASSERT_OK(b.ConvertToCoeffForm(aux_moduli));
   auto p_hats = RnsModulusComplements<TypeParam, BigInteger>(aux_moduli);
   auto p_hat_invs = this->rns_context_->AuxPrimeModulusCrtFactors();
   ASSERT_OK_AND_ASSIGN(std::vector<BigInteger> b_coeffs,
@@ -1599,7 +1970,7 @@ TYPED_TEST(RnsPolynomialTest, ApproxSwitchRnsBasisIsCorrect) {
   ASSERT_OK_AND_ASSIGN(RnsPolynomial<TypeParam> c,
                        a.ApproxSwitchRnsBasis(main_moduli, aux_moduli,
                                               q_hat_inv_mod_qs, q_hat_mod_ps));
-  ASSERT_OK(c.ConvertToCoeffForm(aux_moduli));
+  ASSERT_FALSE(c.IsNttForm());
   EXPECT_EQ(c, b);
 }
 
