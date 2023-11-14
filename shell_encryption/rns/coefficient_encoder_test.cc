@@ -15,15 +15,17 @@
 
 #include "shell_encryption/rns/coefficient_encoder.h"
 
+#include <memory>
 #include <vector>
 
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 #include "absl/log/check.h"
 #include "absl/status/status.h"
-#include "shell_encryption/montgomery.h"
+#include "absl/types/span.h"
 #include "shell_encryption/rns/rns_context.h"
 #include "shell_encryption/rns/rns_modulus.h"
+#include "shell_encryption/rns/rns_polynomial.h"
 #include "shell_encryption/rns/testing/parameters.h"
 #include "shell_encryption/rns/testing/testing_utils.h"
 #include "shell_encryption/testing/parameters.h"
@@ -60,8 +62,7 @@ class CoefficientEncoderTest : public ::testing::Test {
   // Returns the integer modulo q representing the integer `x` (assuming 0 <=
   // `x` < `max_value` < q) using balanced representation, that is, values x in
   // [0, max_value/2] are represented by x (mod q), and values x in
-  // (max_value/2, max_value) are represented by
-  // -(max_value - x) (mod q).
+  // (max_value/2, max_value) are represented by -(max_value - x) (mod q).
   Integer BalancedModRepFor(Integer x, Integer max_value, Integer q) {
     Integer max_value_half = max_value >> 1;
     if (x <= max_value_half) {
@@ -299,12 +300,295 @@ TYPED_TEST(CoefficientEncoderTest,
       testing::SampleMessages<Integer>(k_num_scalars, t);
 
   for (auto scalar : scalars) {
-    // scalar * poly1 should encode (x + y) mod t for x, y in xs, ys.
+    // scalar * poly should encode (scalar * x) mod t for x in xs.
     ASSERT_OK_AND_ASSIGN(auto scaled, poly.Mul(scalar, this->moduli_));
 
     // Decode and check results.
     ASSERT_OK_AND_ASSIGN(auto decoded,
                          encoder.DecodeBgv(scaled, this->moduli_));
+    ASSERT_EQ(decoded.size(), num_coeffs);
+    for (int i = 0; i < num_coeffs; ++i) {
+      EXPECT_EQ(decoded[i], (xs[i] * scalar) % t);
+    }
+  }
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// Tests for BFV coefficient encoding/decoding
+////////////////////////////////////////////////////////////////////////////////
+
+template <typename ModularInt>
+class CoefficientEncoderBfvTest : public ::testing::Test {
+ protected:
+  void SetUp() override {
+    testing::RnsParameters<ModularInt> rns_params =
+        testing::GetRnsParameters<ModularInt>();
+    // BFV encoding currently only supports odd plaintext modulus.
+    if (rns_params.t % 2 == 0) {
+      rns_params.t++;
+    }
+    // Create a RnsContext suitable to use BFV encoding, in particular, this
+    // creates Montgomery integer parameters for the plaintext modulus.
+    auto rns_context = RnsContext<ModularInt>::CreateForBfv(
+        rns_params.log_n, rns_params.qs, rns_params.ps, rns_params.t);
+    CHECK(rns_context.ok());
+    rns_context_ = std::make_unique<const RnsContext<ModularInt>>(
+        std::move(rns_context.value()));
+    main_moduli_ = rns_context_->MainPrimeModuli();
+    aux_moduli_ = rns_context_->AuxPrimeModuli();
+  }
+
+  std::unique_ptr<const RnsContext<ModularInt>> rns_context_;
+  std::vector<const PrimeModulus<ModularInt>*> main_moduli_;
+  std::vector<const PrimeModulus<ModularInt>*> aux_moduli_;
+};
+
+TYPED_TEST_SUITE(CoefficientEncoderBfvTest, testing::ModularIntTypes);
+
+TYPED_TEST(CoefficientEncoderBfvTest, EncodeBfvFailsIfMessageVectorIsTooLong) {
+  using Integer = typename TypeParam::Int;
+  ASSERT_OK_AND_ASSIGN(auto encoder, CoefficientEncoder<TypeParam>::Create(
+                                         this->rns_context_.get()));
+  int num_coeffs_max = 1 << this->rns_context_->LogN();
+  std::vector<Integer> messages(num_coeffs_max + 1, 0);  // longer than 2^log_n
+  EXPECT_THAT(encoder.EncodeBfv(messages, this->main_moduli_),
+              StatusIs(absl::StatusCode::kInvalidArgument,
+                       HasSubstr(absl::StrCat("`messages` can contain at most ",
+                                              num_coeffs_max, " elements"))));
+}
+
+TYPED_TEST(CoefficientEncoderBfvTest, EncodeBfvFailsIfEmptyModuli) {
+  using Integer = typename TypeParam::Int;
+  ASSERT_OK_AND_ASSIGN(auto encoder, CoefficientEncoder<TypeParam>::Create(
+                                         this->rns_context_.get()));
+  int num_coeffs = 1 << this->rns_context_->LogN();
+  std::vector<Integer> messages(num_coeffs, 0);
+  EXPECT_THAT(encoder.EncodeBfv(messages, /*moduli=*/{}),
+              StatusIs(absl::StatusCode::kInvalidArgument,
+                       HasSubstr("`moduli` cannot be empty")));
+}
+
+TYPED_TEST(CoefficientEncoderBfvTest,
+           EncodeBfvFailsIfNullPlaintextModulusParams) {
+  using Integer = typename TypeParam::Int;
+
+  // Create a generic RnsContext which doesn't define Montgomery parameters for
+  // the plaintext modulus.
+  testing::RnsParameters<TypeParam> rns_params =
+      testing::GetRnsParameters<TypeParam>();
+  ASSERT_OK_AND_ASSIGN(auto rns_context, RnsContext<TypeParam>::Create(
+                                             rns_params.log_n, rns_params.qs,
+                                             rns_params.ps, rns_params.t));
+  ASSERT_OK_AND_ASSIGN(auto encoder,
+                       CoefficientEncoder<TypeParam>::Create(&rns_context));
+
+  // EncodeBfv() should fail as rns_context has null Montgomery parameters.
+  int num_coeffs = 1 << this->rns_context_->LogN();
+  std::vector<Integer> messages(num_coeffs, 0);
+  EXPECT_THAT(encoder.EncodeBfv(messages, rns_context.MainPrimeModuli()),
+              StatusIs(absl::StatusCode::kInvalidArgument,
+                       HasSubstr("RnsContext does not contain a valid "
+                                 "plaintext modulus parameters")));
+}
+
+TYPED_TEST(CoefficientEncoderBfvTest, DecodeBfvFailsIfWrongNumberOfModuli) {
+  ASSERT_OK_AND_ASSIGN(auto encoder, CoefficientEncoder<TypeParam>::Create(
+                                         this->rns_context_.get()));
+  ASSERT_OK_AND_ASSIGN(auto zero,
+                       RnsPolynomial<TypeParam>::CreateZero(
+                           this->rns_context_->LogN(), this->main_moduli_));
+  // Run DecodeBfv() with a smaller set of RNS moduli should return an error.
+  int num_moduli = this->main_moduli_.size();
+  EXPECT_THAT(
+      encoder.DecodeBfv(
+          zero, absl::MakeSpan(this->main_moduli_).subspan(0, num_moduli - 1)),
+      StatusIs(absl::StatusCode::kInvalidArgument,
+               HasSubstr(absl::StrCat("`moduli` must contain ", num_moduli,
+                                      " RNS moduli"))));
+}
+
+TYPED_TEST(CoefficientEncoderBfvTest, DecodeBfvFailsIfNullPlaintextModParams) {
+  testing::RnsParameters<TypeParam> rns_params =
+      testing::GetRnsParameters<TypeParam>();
+  // Create a RnsContext not suitable for BFV encoding, in particular, it does
+  // not define Montgomery integer parameters for the plaintext modulus.
+  ASSERT_OK_AND_ASSIGN(auto context, RnsContext<TypeParam>::Create(
+                                         rns_params.log_n, rns_params.qs,
+                                         rns_params.ps, rns_params.t));
+  ASSERT_EQ(context.PlaintextModulusParams().ModParams(), nullptr);
+
+  // Create an encoder based on the RnsContext.
+  ASSERT_OK_AND_ASSIGN(auto encoder,
+                       CoefficientEncoder<TypeParam>::Create(&context));
+
+  std::vector<const PrimeModulus<TypeParam>*> moduli =
+      context.MainPrimeModuli();
+  ASSERT_OK_AND_ASSIGN(
+      auto zero, RnsPolynomial<TypeParam>::CreateZero(context.LogN(), moduli));
+  // DecodeBfv() should fail as the context doesn't define Montgomery parameters
+  // for the plaintext modulus.
+  EXPECT_THAT(encoder.DecodeBfv(zero, moduli),
+              StatusIs(absl::StatusCode::kInvalidArgument,
+                       HasSubstr("RnsContext does not contain valid "
+                                 "plaintext modulus parameters")));
+}
+
+TYPED_TEST(CoefficientEncoderBfvTest, EncodeBfvDecodes) {
+  using Integer = typename TypeParam::Int;
+  ASSERT_OK_AND_ASSIGN(auto encoder, CoefficientEncoder<TypeParam>::Create(
+                                         this->rns_context_.get()));
+
+  // Sample messages mod t and encode the vector to a BFV plaintext polynomial.
+  int num_coeffs = 1 << this->rns_context_->LogN();
+  Integer t = this->rns_context_->PlaintextModulus();
+  std::vector<Integer> messages =
+      testing::SampleMessages<Integer>(num_coeffs, t);
+  ASSERT_OK_AND_ASSIGN(auto poly,
+                       encoder.EncodeBfv(messages, this->main_moduli_));
+
+  // Now decode the RNS polynomial.
+  ASSERT_OK_AND_ASSIGN(auto decoded,
+                       encoder.DecodeBfv(poly, this->main_moduli_));
+  EXPECT_EQ(decoded, messages);
+}
+
+TYPED_TEST(CoefficientEncoderBfvTest, EncodeBfvPadsShortMessageVectorWithZero) {
+  using Integer = typename TypeParam::Int;
+  ASSERT_OK_AND_ASSIGN(auto encoder, CoefficientEncoder<TypeParam>::Create(
+                                         this->rns_context_.get()));
+
+  int num_coeffs = 1 << this->rns_context_->LogN();
+  int num_moduli = this->main_moduli_.size();
+
+  // Empty message vector
+  ASSERT_OK_AND_ASSIGN(auto poly0,
+                       encoder.EncodeBfv(/*messages=*/{}, this->main_moduli_));
+  ASSERT_EQ(poly0.NumCoeffs(), num_coeffs);
+  ASSERT_EQ(poly0.NumModuli(), num_moduli);
+  ASSERT_OK(poly0.ConvertToCoeffForm(this->main_moduli_));
+  for (int i = 0; i < num_moduli; ++i) {
+    auto mod_params_qi = this->main_moduli_[i]->ModParams();
+    auto zero = TypeParam::ImportZero(mod_params_qi);
+    for (auto const& coeff : poly0.Coeffs()[i]) {
+      EXPECT_EQ(coeff, zero);
+    }
+  }
+
+  // A vector with two messages.
+  Integer t = this->rns_context_->PlaintextModulus();
+  std::vector<Integer> messages = testing::SampleMessages<Integer>(2, t);
+  ASSERT_OK_AND_ASSIGN(auto poly1,
+                       encoder.EncodeBfv(messages, this->main_moduli_));
+  ASSERT_EQ(poly1.NumCoeffs(), num_coeffs);
+  ASSERT_EQ(poly1.NumModuli(), num_moduli);
+  ASSERT_OK(poly1.ConvertToCoeffForm(this->main_moduli_));
+  for (int i = 0; i < num_moduli; ++i) {
+    auto mod_params_qi = this->main_moduli_[i]->ModParams();
+    auto zero = TypeParam::ImportZero(mod_params_qi);
+    for (int j = messages.size(); j < num_coeffs; ++j) {
+      EXPECT_EQ(poly1.Coeffs()[i][j], zero);
+    }
+  }
+  ASSERT_OK_AND_ASSIGN(auto decoded,
+                       encoder.DecodeBfv(poly1, this->main_moduli_));
+  ASSERT_EQ(decoded.size(), num_coeffs);
+  for (int j = 0; j < messages.size(); ++j) {
+    EXPECT_EQ(decoded[j], messages[j]);
+  }
+  for (int j = messages.size(); j < num_coeffs; ++j) {
+    EXPECT_EQ(decoded[j], 0);
+  }
+}
+
+TYPED_TEST(CoefficientEncoderBfvTest, DecodeBfvCanRemoveErrors) {
+  using Integer = typename TypeParam::Int;
+  Integer t = this->rns_context_->PlaintextModulus();
+  ASSERT_OK_AND_ASSIGN(auto encoder, CoefficientEncoder<TypeParam>::Create(
+                                         this->rns_context_.get()));
+
+  // Sample messages mod t and encode them to a RNS polynomial.
+  int log_n = this->rns_context_->LogN();
+  int num_coeffs = 1 << log_n;
+  std::vector<Integer> messages =
+      testing::SampleMessages<Integer>(num_coeffs, t);
+  ASSERT_OK_AND_ASSIGN(auto noisy,
+                       encoder.EncodeBfv(messages, this->main_moduli_));
+  ASSERT_TRUE(noisy.IsNttForm());
+  ASSERT_OK(noisy.ConvertToCoeffForm(this->main_moduli_));
+
+  // Sample an error polynomial and then add to the plaintext polynomial.
+  RnsPolynomial<TypeParam> error =
+      testing::SampleTernaryNoises<TypeParam>(log_n, this->main_moduli_);
+  ASSERT_OK(noisy.AddInPlace(error, this->main_moduli_));
+
+  // Now decode the noisy polynomial.
+  ASSERT_OK_AND_ASSIGN(auto decoded,
+                       encoder.DecodeBfv(noisy, this->main_moduli_));
+  EXPECT_EQ(decoded, messages);
+}
+
+TYPED_TEST(CoefficientEncoderBfvTest, EncodeBfvIsAdditiveHomomorphic) {
+  using Integer = typename TypeParam::Int;
+  Integer t = this->rns_context_->PlaintextModulus();
+  ASSERT_OK_AND_ASSIGN(auto encoder, CoefficientEncoder<TypeParam>::Create(
+                                         this->rns_context_.get()));
+
+  // Sample two vectors of messages mod t and encode them to RNS polynomials.
+  int num_coeffs = 1 << this->rns_context_->LogN();
+  std::vector<Integer> xs = testing::SampleMessages<Integer>(num_coeffs, t);
+  std::vector<Integer> ys = testing::SampleMessages<Integer>(num_coeffs, t);
+  ASSERT_OK_AND_ASSIGN(auto poly0, encoder.EncodeBfv(xs, this->main_moduli_));
+  ASSERT_OK_AND_ASSIGN(auto poly1, encoder.EncodeBfv(ys, this->main_moduli_));
+
+  // poly0 + poly1 should encode (x + y) mod t for all x in xs and y in ys.
+  ASSERT_OK_AND_ASSIGN(auto sum, poly0.Add(poly1, this->main_moduli_));
+
+  // Now decode sum and check results.
+  ASSERT_OK_AND_ASSIGN(auto decoded_sum,
+                       encoder.DecodeBfv(sum, this->main_moduli_));
+  ASSERT_EQ(decoded_sum.size(), num_coeffs);
+  for (int i = 0; i < num_coeffs; ++i) {
+    EXPECT_EQ(decoded_sum[i], (xs[i] + ys[i]) % t);
+  }
+
+  // poly0 - poly1 should encodes (x - y) mod t for x, y in xs, ys.
+  ASSERT_OK_AND_ASSIGN(auto diff, poly0.Sub(poly1, this->main_moduli_));
+  ASSERT_OK_AND_ASSIGN(auto decoded_diff,
+                       encoder.DecodeBfv(diff, this->main_moduli_));
+  ASSERT_EQ(decoded_diff.size(), num_coeffs);
+  for (int i = 0; i < num_coeffs; ++i) {
+    bool is_x_larger = xs[i] > ys[i];
+    Integer diff_abs = is_x_larger ? xs[i] - ys[i] : ys[i] - xs[i];
+    Integer diff_exp = is_x_larger ? diff_abs : t - diff_abs;
+    EXPECT_EQ(decoded_diff[i], diff_exp % t);  // make sure we reduce mod t.
+  }
+}
+
+TYPED_TEST(CoefficientEncoderBfvTest,
+           EncodeBfvIsAdditiveHomomorphicWithScalarMultiplication) {
+  using Integer = typename TypeParam::Int;
+
+  // Three random scalar multiplications should be sufficient.
+  constexpr int k_num_scalars = 3;
+
+  ASSERT_OK_AND_ASSIGN(auto encoder, CoefficientEncoder<TypeParam>::Create(
+                                         this->rns_context_.get()));
+  // Sample messages mod t and encode them to a RNS polynomial.
+  Integer t = this->rns_context_->PlaintextModulus();
+  int num_coeffs = 1 << this->rns_context_->LogN();
+  std::vector<Integer> xs = testing::SampleMessages<Integer>(num_coeffs, t);
+  ASSERT_OK_AND_ASSIGN(auto poly, encoder.EncodeBfv(xs, this->main_moduli_));
+
+  // Sample some scalars mod t.
+  std::vector<Integer> scalars =
+      testing::SampleMessages<Integer>(k_num_scalars, t);
+  for (auto scalar : scalars) {
+    // scalar * poly should encode (scalar * x) mod t for x in xs.
+    ASSERT_OK_AND_ASSIGN(auto scaled, poly.Mul(scalar, this->main_moduli_));
+
+    // Decode and check results.
+    ASSERT_OK_AND_ASSIGN(auto decoded,
+                         encoder.DecodeBfv(scaled, this->main_moduli_));
     ASSERT_EQ(decoded.size(), num_coeffs);
     for (int i = 0; i < num_coeffs; ++i) {
       EXPECT_EQ(decoded[i], (xs[i] * scalar) % t);

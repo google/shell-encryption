@@ -62,6 +62,7 @@ cc_test(
         "//shell_encryption:ntt_parameters",
         "//shell_encryption:statusor_fork",
         "//shell_encryption/rns/testing:parameters",
+        "//shell_encryption/rns/testing:testing_utils",
         "//shell_encryption/testing:matchers",
         "//shell_encryption/testing:parameters",
         "//shell_encryption/testing:status_testing",
@@ -103,6 +104,7 @@ cc_test(
         "//shell_encryption:polynomial",
         "//shell_encryption:statusor_fork",
         "//shell_encryption/rns/testing:parameters",
+        "//shell_encryption/rns/testing:testing_utils",
         "//shell_encryption/testing:matchers",
         "//shell_encryption/testing:parameters",
         "//shell_encryption/testing:status_testing",
@@ -173,6 +175,8 @@ cc_library(
         "//shell_encryption:integral_types",
         "//shell_encryption:modulus_conversion",
         "//shell_encryption:montgomery",
+        "//shell_encryption:statusor_fork",
+        "@com_google_absl//absl/numeric:int128",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings",
@@ -186,7 +190,9 @@ cc_test(
     deps = [
         ":coefficient_encoder",
         ":rns_context",
+        ":rns_integer",
         ":rns_modulus",
+        ":rns_polynomial",
         "//shell_encryption:montgomery",
         "//shell_encryption/rns/testing:parameters",
         "//shell_encryption/rns/testing:testing_utils",
@@ -196,6 +202,7 @@ cc_test(
         "@com_github_google_googletest//:gtest_main",
         "@com_google_absl//absl/log:check",
         "@com_google_absl//absl/status",
+        "@com_google_absl//absl/types:span",
     ],
 )
 
@@ -213,9 +220,10 @@ cc_library(
         ":rns_polynomial",
         "//shell_encryption:dft_transformations",
         "//shell_encryption:integral_types",
-        "//shell_encryption:modulus_conversion",
+        "//shell_encryption:montgomery",
         "//shell_encryption:ntt_parameters",
         "//shell_encryption:statusor_fork",
+        "@com_google_absl//absl/numeric:int128",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings",
@@ -230,7 +238,9 @@ cc_test(
         ":crt_interpolation",
         ":finite_field_encoder",
         ":rns_context",
+        ":rns_integer",
         ":rns_modulus",
+        ":rns_polynomial",
         "//shell_encryption:montgomery",
         "//shell_encryption/rns/testing:parameters",
         "//shell_encryption/rns/testing:testing_utils",
@@ -240,6 +250,7 @@ cc_test(
         "@com_google_absl//absl/log:check",
         "@com_google_absl//absl/random",
         "@com_google_absl//absl/status",
+        "@com_google_absl//absl/types:span",
     ],
 )
 
@@ -344,6 +355,82 @@ cc_library(
     ],
 )
 
+cc_test(
+    name = "rns_bgv_ciphertext_test",
+    srcs = ["rns_bgv_ciphertext_test.cc"],
+    deps = [
+        ":coefficient_encoder",
+        ":finite_field_encoder",
+        ":rns_bgv_ciphertext",
+        ":rns_context",
+        ":rns_error_params",
+        ":rns_integer",
+        ":rns_modulus",
+        ":rns_polynomial",
+        ":rns_secret_key",
+        "//shell_encryption/prng:single_thread_hkdf_prng",
+        "//shell_encryption/rns/testing:parameters",
+        "//shell_encryption/rns/testing:testing_utils",
+        "//shell_encryption/testing:matchers",
+        "//shell_encryption/testing:parameters",
+        "//shell_encryption/testing:status_testing",
+        "@com_github_google_googletest//:gtest_main",
+        "@com_google_absl//absl/log:check",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/types:span",
+    ],
+)
+
+# BFV ciphertext in RNS form.
+cc_library(
+    name = "rns_bfv_ciphertext",
+    srcs = ["rns_bfv_ciphertext.cc"],
+    hdrs = ["rns_bfv_ciphertext.h"],
+    deps = [
+        ":rns_ciphertext",
+        ":rns_context",
+        ":rns_error_params",
+        ":rns_integer",
+        ":rns_modulus",
+        ":rns_polynomial",
+        "//shell_encryption:integral_types",
+        "//shell_encryption:montgomery",
+        "//shell_encryption:statusor_fork",
+        "@com_google_absl//absl/numeric:int128",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/types:span",
+    ],
+)
+
+cc_test(
+    name = "rns_bfv_ciphertext_test",
+    srcs = ["rns_bfv_ciphertext_test.cc"],
+    deps = [
+        ":coefficient_encoder",
+        ":finite_field_encoder",
+        ":rns_bfv_ciphertext",
+        ":rns_context",
+        ":rns_error_params",
+        ":rns_integer",
+        ":rns_modulus",
+        ":rns_polynomial",
+        ":rns_secret_key",
+        "//shell_encryption/prng:single_thread_hkdf_prng",
+        "//shell_encryption/rns/testing:parameters",
+        "//shell_encryption/rns/testing:testing_utils",
+        "//shell_encryption/testing:matchers",
+        "//shell_encryption/testing:parameters",
+        "//shell_encryption/testing:status_testing",
+        "@com_github_google_googletest//:gtest_main",
+        "@com_google_absl//absl/log:check",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/types:span",
+    ],
+)
+
 # Error distribution with RNS polynomial representation.
 cc_library(
     name = "error_distribution",
@@ -390,10 +477,10 @@ cc_library(
     deps = [
         ":coefficient_encoder",
         ":error_distribution",
+        ":rns_bfv_ciphertext",
         ":rns_bgv_ciphertext",
         ":rns_ciphertext",
         ":rns_error_params",
-        ":rns_integer",
         ":rns_modulus",
         ":rns_polynomial",
         "//shell_encryption:integral_types",
@@ -414,10 +501,10 @@ cc_test(
     deps = [
         ":coefficient_encoder",
         ":finite_field_encoder",
+        ":rns_bfv_ciphertext",
         ":rns_bgv_ciphertext",
         ":rns_context",
         ":rns_error_params",
-        ":rns_integer",
         ":rns_modulus",
         ":rns_polynomial",
         ":rns_secret_key",
@@ -485,10 +572,10 @@ cc_library(
     hdrs = ["rns_galois_key.h"],
     deps = [
         ":error_distribution",
+        ":rns_bfv_ciphertext",
         ":rns_bgv_ciphertext",
-        ":rns_error_params",
+        ":rns_ciphertext",
         ":rns_gadget",
-        ":rns_integer",
         ":rns_modulus",
         ":rns_polynomial",
         ":rns_secret_key",
@@ -502,7 +589,6 @@ cc_library(
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings",
-        "@com_google_absl//absl/types:span",
     ],
 )
 
@@ -511,6 +597,7 @@ cc_test(
     srcs = ["rns_galois_key_test.cc"],
     deps = [
         ":finite_field_encoder",
+        ":rns_bfv_ciphertext",
         ":rns_bgv_ciphertext",
         ":rns_context",
         ":rns_error_params",
@@ -526,7 +613,6 @@ cc_test(
         "//shell_encryption/testing:testing_prng",
         "@com_github_google_googletest//:gtest_main",
         "@com_google_absl//absl/log:check",
-        "@com_google_absl//absl/random",
         "@com_google_absl//absl/status",
     ],
 )

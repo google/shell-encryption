@@ -37,8 +37,7 @@ namespace rlwe {
 // This class specifies how to encode messages in F_t^N as a polynomial
 // in Z[X]/(Q, X^N+1), where t is the plaintext modulus and Q is the ciphertext
 // modulus. The plaintext modulus t must be a prime such that t == 1 (mod 2*N).
-// This encoding scheme is compatible with the BGV scheme where the plaintext
-// resides in the least significant bits of ciphertext modulus Q.
+// This class implements the so-called "slot encoding" for BGV and BFV.
 template <typename ModularInt>
 class FiniteFieldEncoder {
  public:
@@ -51,17 +50,19 @@ class FiniteFieldEncoder {
   static absl::StatusOr<FiniteFieldEncoder<ModularInt>> Create(
       const RnsContext<ModularInt>* context);
 
-  // Returns a polynomial (in coefficient form) whose slots encode `messages`.
+  // Returns a polynomial (in coefficient form) whose slots encode `messages`
+  // as in the BGV scheme.
   absl::StatusOr<RnsPolynomial<ModularInt>> EncodeBgv(
       absl::Span<const Integer> messages,
       absl::Span<const PrimeModulus<ModularInt>* const> moduli) const;
 
-  // Returns the plaintext messages encoded in the slots of `plaintext`.
+  // Returns the messages that are encoded in the slots of `plaintext` as in the
+  // BGV scheme.
   absl::StatusOr<std::vector<Integer>> DecodeBgv(
       RnsPolynomial<ModularInt> plaintext,
       absl::Span<const PrimeModulus<ModularInt>* const> moduli) const;
 
-  // Alternative decoding that allows for additional parameter flexabillity
+  // Alternative decoding that allows for additional parameter flexibility
   // at the expense of being slower.
   template <typename BigInteger>
   absl::StatusOr<std::vector<Integer>> DecodeBgvWithCrt(
@@ -70,31 +71,45 @@ class FiniteFieldEncoder {
       absl::Span<const BigInteger> modulus_hats,
       absl::Span<const ModularInt> modulus_hat_invs) const;
 
+  // Returns the plaintext polynomial where `messages` are encoded in the slots
+  // of `plaintext` as in the BFV scheme. When `is_scaled` is set, this encoding
+  // method can be used in BFV scheme to encrypt `messages`. When `is_scaled` is
+  // set to false, this encoding method produces a polynomial suitable for
+  // ciphertext-plaintext multiplication in BFV.
+  absl::StatusOr<RnsPolynomial<ModularInt>> EncodeBfv(
+      absl::Span<const Integer> messages,
+      absl::Span<const PrimeModulus<ModularInt>* const> moduli,
+      bool is_scaled = true) const;
+
+  // Returns the messages that are encoded in the slots of `plaintext` as in the
+  // BGV scheme.
+  absl::StatusOr<std::vector<Integer>> DecodeBfv(
+      RnsPolynomial<ModularInt> plaintext,
+      absl::Span<const PrimeModulus<ModularInt>* const> moduli) const;
+
   // Accessors
   int LogN() const { return coeff_encoder_->LogN(); }
 
   // The plaintext modulus.
-  Integer PlaintextModulus() const { return mod_params_t_->modulus; }
+  Integer PlaintextModulus() const { return context_->PlaintextModulus(); }
+
+  // The underlying RNS context.
+  const RnsContext<ModularInt>* Context() const { return context_; }
 
  private:
   explicit FiniteFieldEncoder(
+      const RnsContext<ModularInt>* context,
       std::unique_ptr<const CoefficientEncoder<ModularInt>> coeff_encoder,
-      std::unique_ptr<const ModularIntParams> mod_params_t,
-      std::unique_ptr<const NttParams> ntt_params_t,
       std::vector<int> slot_indices)
-      : coeff_encoder_(std::move(coeff_encoder)),
-        mod_params_t_(std::move(mod_params_t)),
-        ntt_params_t_(std::move(ntt_params_t)),
+      : context_(context),
+        coeff_encoder_(std::move(coeff_encoder)),
         slot_indices_(std::move(slot_indices)) {}
+
+  // Doesn't own the RnsContext, which must live longer than this encoder.
+  const RnsContext<ModularInt>* context_;
 
   // The coefficient encoder used to remove error during decoding.
   std::unique_ptr<const CoefficientEncoder<ModularInt>> coeff_encoder_;
-
-  // Montgomery integer paramters for (mod t).
-  std::unique_ptr<const ModularIntParams> mod_params_t_;
-
-  // NTT parameters for (mod t).
-  std::unique_ptr<const NttParams> ntt_params_t_;
 
   // The permutation from messages indices to their slot indices.
   std::vector<int> slot_indices_;
@@ -145,7 +160,11 @@ FiniteFieldEncoder<ModularInt>::DecodeBgvWithCrt(
   }
 
   // Remove error and get the coefficients of the plaintext polynomial (mod t).
-  BigInteger t = static_cast<BigInteger>(mod_params_t_->modulus);
+  const ModularIntParams* mod_params_t =
+      context_->PlaintextModulusParams().ModParams();
+  const NttParams* ntt_params_t =
+      context_->PlaintextModulusParams().NttParams();
+  BigInteger t = static_cast<BigInteger>(mod_params_t->modulus);
   RLWE_ASSIGN_OR_RETURN(
       std::vector<BigInteger> coeffs,
       RemoveErrorOnMsb<BigInteger>(std::move(noisy_coeffs), q, t));
@@ -158,16 +177,16 @@ FiniteFieldEncoder<ModularInt>::DecodeBgvWithCrt(
     RLWE_ASSIGN_OR_RETURN(
         ModularInt slot,
         ModularInt::ImportInt(static_cast<typename ModularInt::Int>(coeff),
-                              mod_params_t_.get()));
+                              mod_params_t));
     slots.push_back(std::move(slot));
   }
   RLWE_RETURN_IF_ERROR(
-      ForwardNumberTheoreticTransform(slots, *ntt_params_t_, *mod_params_t_));
+      ForwardNumberTheoreticTransform(slots, *ntt_params_t, *mod_params_t));
 
   // Lastly we move slots to their positions in the message vector.
   std::vector<typename ModularInt::Int> values(num_coeffs, 0);
   for (int i = 0; i < num_coeffs; ++i) {
-    values[i] = slots[slot_indices_[i]].ExportInt(mod_params_t_.get());
+    values[i] = slots[slot_indices_[i]].ExportInt(mod_params_t);
   }
   return values;
 }

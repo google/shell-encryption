@@ -20,14 +20,17 @@
 #include <utility>
 #include <vector>
 
+#include "absl/status/status.h"
+#include "absl/status/statusor.h"
 #include "absl/types/span.h"
 #include "shell_encryption/prng/prng.h"
 #include "shell_encryption/rns/coefficient_encoder.h"
 #include "shell_encryption/rns/error_distribution.h"
+#include "shell_encryption/rns/rns_bfv_ciphertext.h"
 #include "shell_encryption/rns/rns_bgv_ciphertext.h"
 #include "shell_encryption/rns/rns_ciphertext.h"
 #include "shell_encryption/rns/rns_error_params.h"
-#include "shell_encryption/rns/rns_integer.h"
+#include "shell_encryption/rns/rns_modulus.h"
 #include "shell_encryption/rns/rns_polynomial.h"
 #include "shell_encryption/status_macros.h"
 
@@ -40,6 +43,7 @@ namespace rlwe {
 template <typename ModularInt>
 class RnsRlweSecretKey {
  public:
+  using Integer = typename ModularInt::Int;
   using ModularIntParams = typename ModularInt::Params;
 
   // Samples a secret key from the error distribution, and returns its
@@ -68,7 +72,7 @@ class RnsRlweSecretKey {
       const RnsBgvCiphertext<ModularInt>& ciphertext,
       const Encoder* encoder) const;
 
-  // Alternative decoding that allows for additional parameter flexabillity
+  // Alternative decoding that allows for additional parameter flexibility
   // at the expense of being slower.
   template <typename Encoder = CoefficientEncoder<ModularInt>,
             typename BigInteger>
@@ -76,6 +80,28 @@ class RnsRlweSecretKey {
       const RnsRlweCiphertext<ModularInt>& ciphertext, const Encoder* encoder,
       absl::Span<const BigInteger> modulus_hats,
       absl::Span<const ModularInt> modulus_hat_invs) const;
+
+  // Returns a ciphertext that encrypts `messages` under this secret key as in
+  // the BFV scheme, where `messages` are encoded using the given encoder, the
+  // encryption randomness is supplied using `prng`, and the error parameters
+  // are given in `error_params`. In particular, the messages are scaled up to
+  // stay at the high order bits of the ciphertext modulus, and errors will stay
+  // at the lower order bits.
+  // Note that the encoder type is a template parameter, and by default we use
+  // `CoefficientEncoder` to use messages as coefficients of the plaintext
+  // polynomial.
+  template <typename Encoder = CoefficientEncoder<ModularInt>>
+  absl::StatusOr<RnsBfvCiphertext<ModularInt>> EncryptBfv(
+      absl::Span<const typename ModularInt::Int> messages,
+      const Encoder* encoder, const RnsErrorParams<ModularInt>* error_params,
+      SecurePrng* prng) const;
+
+  // Decrypts a BFV ciphertext using this secret key. The returned result is the
+  // underlying messages decoded using `encoder`.
+  template <typename Encoder = CoefficientEncoder<ModularInt>>
+  absl::StatusOr<std::vector<typename ModularInt::Int>> DecryptBfv(
+      const RnsBfvCiphertext<ModularInt>& ciphertext,
+      const Encoder* encoder) const;
 
   // Reduces the modulus of the secret polynomial from Q = q0 * .. * ql to Q/ql.
   absl::Status ModReduce();
@@ -198,7 +224,7 @@ RnsRlweSecretKey<ModularInt>::DecryptBgv(
                         RawDecrypt(ciphertext));
 
   // Decode the noisy plaintext polynomial.
-  return encoder->DecodeBgv(noisy_plaintext, moduli_);
+  return encoder->DecodeBgv(std::move(noisy_plaintext), moduli_);
 }
 
 // Decrypt with the alternative method `DecodeBgvWithCrt` in
@@ -237,6 +263,86 @@ RnsRlweSecretKey<ModularInt>::DecryptBgvWithCrt(
   // Decode the noisy plaintext polynomial.
   return encoder->template DecodeBgvWithCrt<BigInteger>(
       std::move(noisy_plaintext), moduli_, modulus_hats, modulus_hat_invs);
+}
+
+// BFV encryption
+template <typename ModularInt>
+template <typename Encoder>
+absl::StatusOr<RnsBfvCiphertext<ModularInt>>
+RnsRlweSecretKey<ModularInt>::EncryptBfv(
+    absl::Span<const typename ModularInt::Int> messages, const Encoder* encoder,
+    const RnsErrorParams<ModularInt>* error_params, SecurePrng* prng) const {
+  if (encoder == nullptr) {
+    return absl::InvalidArgumentError("`encoder` must not be null.");
+  }
+  if (error_params == nullptr) {
+    return absl::InvalidArgumentError("`error_params` must not be null.");
+  }
+  if (prng == nullptr) {
+    return absl::InvalidArgumentError("`prng` must not be null.");
+  }
+
+  // Encode messages into a plaintext polynomial.
+  RLWE_ASSIGN_OR_RETURN(RnsPolynomial<ModularInt> plaintext,
+                        encoder->EncodeBfv(messages, moduli_));
+  if (!plaintext.IsNttForm()) {
+    RLWE_RETURN_IF_ERROR(plaintext.ConvertToNttForm(moduli_));
+  }
+
+  // Sample a from the uniform distribution.
+  RLWE_ASSIGN_OR_RETURN(
+      auto a, RnsPolynomial<ModularInt>::SampleUniform(LogN(), prng, moduli_));
+
+  // Sample the error term e (mod Q) from the error distribution.
+  RLWE_ASSIGN_OR_RETURN(
+      RnsPolynomial<ModularInt> c0,
+      SampleError<ModularInt>(LogN(), variance_, moduli_, prng));
+
+  // c0 = e + Encode(m) (mod Q).
+  RLWE_RETURN_IF_ERROR(c0.AddInPlace(plaintext, moduli_));
+
+  // c0 = e + Encode(m) + a * key (mod Q).
+  RLWE_RETURN_IF_ERROR(c0.FusedMulAddInPlace(a, key_, moduli_));
+
+  // c1 = -a (mod Q).
+  RLWE_RETURN_IF_ERROR(a.NegateInPlace(moduli_));
+
+  return RnsBfvCiphertext<ModularInt>({std::move(c0), std::move(a)}, moduli_,
+                                      /*power=*/1,
+                                      error_params->B_secretkey_encryption(),
+                                      error_params, encoder->Context());
+}
+
+template <typename ModularInt>
+template <typename Encoder>
+absl::StatusOr<std::vector<typename ModularInt::Int>>
+RnsRlweSecretKey<ModularInt>::DecryptBfv(
+    const RnsBfvCiphertext<ModularInt>& ciphertext,
+    const Encoder* encoder) const {
+  if (ciphertext.PowerOfS() != 1) {
+    return absl::InvalidArgumentError(
+        "Cannot decrypt `ciphertext` with power of s not equal to 1.");
+  }
+  if (ciphertext.LogN() != LogN()) {
+    return absl::InvalidArgumentError(
+        "Cannot decrypt `ciphertext` with a mismatching polynomial degree.");
+  }
+  if (ciphertext.NumModuli() != NumModuli()) {
+    return absl::InvalidArgumentError(
+        "Cannot decrypt `ciphertext` with a mismatching number"
+        " of prime moduli.");
+  }
+  if (encoder == nullptr) {
+    return absl::InvalidArgumentError("`encoder` must not be null.");
+  }
+
+  // Do the raw decryption to get the inner product of ciphertext and secret
+  // key.
+  RLWE_ASSIGN_OR_RETURN(RnsPolynomial<ModularInt> noisy_plaintext,
+                        RawDecrypt(ciphertext));
+
+  // Decode the noisy plaintext polynomial.
+  return encoder->DecodeBfv(std::move(noisy_plaintext), moduli_);
 }
 
 }  // namespace rlwe

@@ -22,8 +22,10 @@
 #include <vector>
 
 #include "absl/log/check.h"
+#include "absl/numeric/int128.h"
 #include "absl/random/random.h"
 #include "absl/types/span.h"
+#include "shell_encryption/integral_types.h"
 #include "shell_encryption/rns/rns_modulus.h"
 #include "shell_encryption/rns/rns_polynomial.h"
 

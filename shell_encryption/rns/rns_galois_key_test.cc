@@ -23,9 +23,9 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 #include "absl/log/check.h"
-#include "absl/random/random.h"
 #include "absl/status/status.h"
 #include "shell_encryption/rns/finite_field_encoder.h"
+#include "shell_encryption/rns/rns_bfv_ciphertext.h"
 #include "shell_encryption/rns/rns_bgv_ciphertext.h"
 #include "shell_encryption/rns/rns_context.h"
 #include "shell_encryption/rns/rns_error_params.h"
@@ -46,7 +46,6 @@ using ::rlwe::testing::StatusIs;
 using ::testing::HasSubstr;
 using Prng = testing::TestingPrng;
 
-constexpr int kLogGadgetBase = 10;
 constexpr int kVariance = 8;
 constexpr PrngType kPrngType = PRNG_TYPE_HKDF;
 
@@ -62,49 +61,86 @@ class RnsGaloisKeyTest : public ::testing::Test {
 
   void SetUp() override { prng_ = std::make_unique<testing::TestingPrng>(0); }
 
-  void SetUpRnsParameters(const RnsParams& params) {
+  void SetUpBgvParameters(const RnsParams& params) {
     // Use parameters suitable for finite field encoding.
-    auto rns_context = RnsContext<ModularInt>::Create(params.log_n, params.qs,
-                                                      params.ps, params.t);
+    auto rns_context = RnsContext<ModularInt>::CreateForBgvFiniteFieldEncoding(
+        params.log_n, params.qs, params.ps, params.t);
     CHECK(rns_context.ok());
     rns_context_ = std::make_unique<const RnsContext<ModularInt>>(
         std::move(rns_context.value()));
-    moduli_ = rns_context_->MainPrimeModuli();
+    main_moduli_ = rns_context_->MainPrimeModuli();
 
     int level = params.qs.size() - 1;
     auto q_hats = rns_context_->MainPrimeModulusComplements(level).value();
     auto q_hat_invs = rns_context_->MainPrimeModulusCrtFactors(level).value();
 
-    std::vector<size_t> log_bs(params.qs.size(), kLogGadgetBase);
+    std::vector<size_t> log_bs(params.qs.size(), params.log_gadget_base);
     auto gadget = RnsGadget<ModularInt>::Create(params.log_n, log_bs, q_hats,
-                                                q_hat_invs, moduli_);
+                                                q_hat_invs, main_moduli_);
     CHECK(gadget.ok());
     gadget_ = std::make_unique<const RnsGadget<ModularInt>>(
         std::move(gadget.value()));
 
     auto error_params = RnsErrorParams<ModularInt>::Create(
-        params.log_n, moduli_, /*aux_moduli=*/{},
+        params.log_n, main_moduli_, /*aux_moduli=*/{},
         log2(static_cast<double>(params.t)), sqrt(kVariance));
     CHECK(error_params.ok());
     error_params_ = std::make_unique<const RnsErrorParams<ModularInt>>(
         std::move(error_params.value()));
   }
 
-  void SetUpDefaultRnsParameters() {
+  void SetUpBfvParameters(const RnsParams& params) {
+    // Use parameters suitable for finite field encoding.
+    auto rns_context = RnsContext<ModularInt>::CreateForBfvFiniteFieldEncoding(
+        params.log_n, params.qs, params.ps, params.t);
+    CHECK(rns_context.ok());
+    rns_context_ = std::make_unique<const RnsContext<ModularInt>>(
+        std::move(rns_context.value()));
+    main_moduli_ = rns_context_->MainPrimeModuli();
+    aux_moduli_ = rns_context_->AuxPrimeModuli();
+
+    int level = params.qs.size() - 1;
+    auto q_hats = rns_context_->MainPrimeModulusComplements(level).value();
+    auto q_hat_invs = rns_context_->MainPrimeModulusCrtFactors(level).value();
+
+    std::vector<size_t> log_bs(params.qs.size(), params.log_gadget_base);
+    auto gadget = RnsGadget<ModularInt>::Create(params.log_n, log_bs, q_hats,
+                                                q_hat_invs, main_moduli_);
+    CHECK(gadget.ok());
+    gadget_ = std::make_unique<const RnsGadget<ModularInt>>(
+        std::move(gadget.value()));
+
+    auto error_params = RnsErrorParams<ModularInt>::Create(
+        params.log_n, main_moduli_, /*aux_moduli=*/{},
+        log2(static_cast<double>(params.t)), sqrt(kVariance));
+    CHECK(error_params.ok());
+    error_params_ = std::make_unique<const RnsErrorParams<ModularInt>>(
+        std::move(error_params.value()));
+  }
+
+  void SetUpDefaultBgvParameters() {
     auto all_params =
         testing::GetRnsParametersForFiniteFieldEncoding<ModularInt>();
     CHECK(!all_params.empty());
-    SetUpRnsParameters(all_params[0]);
+    SetUpBgvParameters(all_params[0]);
+  }
+
+  void SetUpDefaultBfvParameters() {
+    auto all_params =
+        testing::GetBfvParametersForFiniteFieldEncoding<ModularInt>();
+    CHECK(!all_params.empty());
+    SetUpBgvParameters(all_params[0]);
   }
 
   // Sample a secret key from prng.
   absl::StatusOr<RnsRlweSecretKey<ModularInt>> SampleSecretKey() const {
     return RnsRlweSecretKey<ModularInt>::Sample(rns_context_->LogN(), kVariance,
-                                                moduli_, prng_.get());
+                                                main_moduli_, prng_.get());
   }
 
   std::unique_ptr<const RnsContext<ModularInt>> rns_context_;
-  std::vector<const PrimeModulus<ModularInt>*> moduli_;
+  std::vector<const PrimeModulus<ModularInt>*> main_moduli_;
+  std::vector<const PrimeModulus<ModularInt>*> aux_moduli_;
   std::unique_ptr<const RnsGadget<ModularInt>> gadget_;
   std::unique_ptr<const RnsErrorParams<ModularInt>> error_params_;
   std::unique_ptr<Prng> prng_;
@@ -113,8 +149,8 @@ class RnsGaloisKeyTest : public ::testing::Test {
 TYPED_TEST_SUITE(RnsGaloisKeyTest,
                  testing::ModularIntTypesForFiniteFieldEncoding);
 
-TYPED_TEST(RnsGaloisKeyTest, CreateForBgvFailsIfPowerIsOutOfRange) {
-  this->SetUpDefaultRnsParameters();
+TYPED_TEST(RnsGaloisKeyTest, CreateFailsIfPowerIsOutOfRange) {
+  this->SetUpDefaultBgvParameters();
   ASSERT_OK_AND_ASSIGN(RnsRlweSecretKey<TypeParam> secret_key,
                        this->SampleSecretKey());
 
@@ -150,8 +186,8 @@ TYPED_TEST(RnsGaloisKeyTest, CreateForBgvFailsIfPowerIsOutOfRange) {
                HasSubstr("`power` must be a non-negative odd integer")));
 }
 
-TYPED_TEST(RnsGaloisKeyTest, CreateForBgvFailsIfVarianceIsNotPositive) {
-  this->SetUpDefaultRnsParameters();
+TYPED_TEST(RnsGaloisKeyTest, CreateFailsIfVarianceIsNotPositive) {
+  this->SetUpDefaultBgvParameters();
   ASSERT_OK_AND_ASSIGN(RnsRlweSecretKey<TypeParam> secret_key,
                        this->SampleSecretKey());
 
@@ -167,8 +203,8 @@ TYPED_TEST(RnsGaloisKeyTest, CreateForBgvFailsIfVarianceIsNotPositive) {
                        HasSubstr("`variance` must be positive")));
 }
 
-TYPED_TEST(RnsGaloisKeyTest, CreateForBgvFailsIfGadgetIsNull) {
-  this->SetUpDefaultRnsParameters();
+TYPED_TEST(RnsGaloisKeyTest, CreateFailsIfGadgetIsNull) {
+  this->SetUpDefaultBgvParameters();
   ASSERT_OK_AND_ASSIGN(RnsRlweSecretKey<TypeParam> secret_key,
                        this->SampleSecretKey());
 
@@ -179,8 +215,8 @@ TYPED_TEST(RnsGaloisKeyTest, CreateForBgvFailsIfGadgetIsNull) {
                        HasSubstr("`gadget` must not be null")));
 }
 
-TYPED_TEST(RnsGaloisKeyTest, CreateForBgvFailsIfPrngTypeIsInvalid) {
-  this->SetUpDefaultRnsParameters();
+TYPED_TEST(RnsGaloisKeyTest, CreateFailsIfPrngTypeIsInvalid) {
+  this->SetUpDefaultBgvParameters();
   ASSERT_OK_AND_ASSIGN(RnsRlweSecretKey<TypeParam> secret_key,
                        this->SampleSecretKey());
 
@@ -195,7 +231,7 @@ TYPED_TEST(RnsGaloisKeyTest, ApplyToFailsIfCiphertextHasMismatchPowerOfS) {
   constexpr int k_gk_power = 5;
   constexpr int k_ctxt_power = 1;
 
-  this->SetUpDefaultRnsParameters();
+  this->SetUpDefaultBgvParameters();
   ASSERT_OK_AND_ASSIGN(RnsRlweSecretKey<TypeParam> secret_key,
                        this->SampleSecretKey());
 
@@ -209,9 +245,9 @@ TYPED_TEST(RnsGaloisKeyTest, ApplyToFailsIfCiphertextHasMismatchPowerOfS) {
   int log_n = this->rns_context_->LogN();
   ASSERT_OK_AND_ASSIGN(
       RnsPolynomial<TypeParam> zero,
-      RnsPolynomial<TypeParam>::CreateZero(log_n, this->moduli_,
+      RnsPolynomial<TypeParam>::CreateZero(log_n, this->main_moduli_,
                                            /*is_ntt=*/false));
-  RnsBgvCiphertext<TypeParam> ciphertext({zero, zero}, this->moduli_,
+  RnsBgvCiphertext<TypeParam> ciphertext({zero, zero}, this->main_moduli_,
                                          k_ctxt_power, /*error=*/0,
                                          this->error_params_.get());
 
@@ -226,12 +262,12 @@ TYPED_TEST(RnsGaloisKeyTest, ApplyToFailsIfCiphertextHasMismatchPowerOfS) {
 
 TYPED_TEST(RnsGaloisKeyTest, ApplyToFailsIfCiphertextHasMismatchRnsModuli) {
   // This test requires at least two RNS moduli.
-  if (this->moduli_.size() < 2) {
+  if (this->main_moduli_.size() < 2) {
     return;
   }
 
   constexpr int k_power = 5;
-  this->SetUpDefaultRnsParameters();
+  this->SetUpDefaultBgvParameters();
 
   ASSERT_OK_AND_ASSIGN(RnsRlweSecretKey<TypeParam> secret_key,
                        this->SampleSecretKey());
@@ -242,7 +278,7 @@ TYPED_TEST(RnsGaloisKeyTest, ApplyToFailsIfCiphertextHasMismatchRnsModuli) {
 
   // Create a zero ciphertext (0, 0) with a smaller set of RNS moduli.
   int log_n = this->rns_context_->LogN();
-  std::vector<const PrimeModulus<TypeParam>*> small_moduli = this->moduli_;
+  std::vector<const PrimeModulus<TypeParam>*> small_moduli = this->main_moduli_;
   small_moduli.pop_back();
   ASSERT_OK_AND_ASSIGN(RnsPolynomial<TypeParam> zero,
                        RnsPolynomial<TypeParam>::CreateZero(log_n, small_moduli,
@@ -262,7 +298,7 @@ TYPED_TEST(RnsGaloisKeyTest, ApplyToFailsIfCiphertextHasMismatchRnsModuli) {
 TYPED_TEST(RnsGaloisKeyTest, ApplyToFailsIfCiphertextDegreeLargerThanOne) {
   constexpr int k_power = 5;
 
-  this->SetUpDefaultRnsParameters();
+  this->SetUpDefaultBgvParameters();
   ASSERT_OK_AND_ASSIGN(RnsRlweSecretKey<TypeParam> secret_key,
                        this->SampleSecretKey());
 
@@ -275,9 +311,9 @@ TYPED_TEST(RnsGaloisKeyTest, ApplyToFailsIfCiphertextDegreeLargerThanOne) {
   int log_n = this->rns_context_->LogN();
   ASSERT_OK_AND_ASSIGN(
       RnsPolynomial<TypeParam> zero,
-      RnsPolynomial<TypeParam>::CreateZero(log_n, this->moduli_,
+      RnsPolynomial<TypeParam>::CreateZero(log_n, this->main_moduli_,
                                            /*is_ntt=*/false));
-  RnsBgvCiphertext<TypeParam> ciphertext({zero, zero, zero}, this->moduli_,
+  RnsBgvCiphertext<TypeParam> ciphertext({zero, zero, zero}, this->main_moduli_,
                                          k_power, /*error=*/0,
                                          this->error_params_.get());
 
@@ -289,7 +325,7 @@ TYPED_TEST(RnsGaloisKeyTest, ApplyToFailsIfCiphertextDegreeLargerThanOne) {
           HasSubstr("Galois key can only apply to a ciphertext of degree 1")));
 }
 
-TYPED_TEST(RnsGaloisKeyTest, GaloisKeyCanRotateEncryptedSlots) {
+TYPED_TEST(RnsGaloisKeyTest, GaloisKeyForBgvCanRotateEncryptedSlots) {
   using Encoder = FiniteFieldEncoder<TypeParam>;
   using Integer = typename TypeParam::Int;
 
@@ -297,7 +333,7 @@ TYPED_TEST(RnsGaloisKeyTest, GaloisKeyCanRotateEncryptedSlots) {
 
   for (auto const& params :
        testing::GetRnsParametersForFiniteFieldEncoding<TypeParam>()) {
-    this->SetUpRnsParameters(params);
+    this->SetUpBgvParameters(params);
 
     ASSERT_OK_AND_ASSIGN(auto encoder,
                          Encoder::Create(this->rns_context_.get()));
@@ -312,6 +348,9 @@ TYPED_TEST(RnsGaloisKeyTest, GaloisKeyCanRotateEncryptedSlots) {
         RnsGaloisKey<TypeParam> gk,
         RnsGaloisKey<TypeParam>::CreateForBgv(secret_key, k_power, kVariance,
                                               gadget, t, kPrngType));
+    ASSERT_EQ(gk.Gadget(), gadget);
+    ASSERT_EQ(gk.Dimension(), gadget->Dimension());
+    ASSERT_EQ(gk.SubstitutionPower(), k_power);
 
     int num_coeffs = 1 << this->rns_context_->LogN();
     std::vector<Integer> values =
@@ -357,7 +396,7 @@ TYPED_TEST(RnsGaloisKeyTest, GaloisKeyCanBeInstantiatedUsingPrngs) {
   constexpr int k_power = 5;  // rotation by one slot.
 
   // Using the default parameter for each integer type is sufficient.
-  this->SetUpDefaultRnsParameters();
+  this->SetUpDefaultBgvParameters();
   // Keep the same secret key and a ciphertext that encrypts values in slots.
   ASSERT_OK_AND_ASSIGN(RnsRlweSecretKey<TypeParam> secret_key,
                        this->SampleSecretKey());
@@ -405,8 +444,8 @@ TYPED_TEST(RnsGaloisKeyTest, GaloisKeyCanBeInstantiatedUsingPrngs) {
 }
 
 // Checks that applying two Galois keys with substitution powers a, b, resp,
-// is equivalent to substituting X with X^(ab) on plaintext.
-TYPED_TEST(RnsGaloisKeyTest, GaloisKeyComposedApplication) {
+// on a BGV ciphertext is equivalent to substituting X with X^(ab) on plaintext.
+TYPED_TEST(RnsGaloisKeyTest, GaloisKeyForBgvComposedApplication) {
   using Encoder = FiniteFieldEncoder<TypeParam>;
   using Integer = typename TypeParam::Int;
 
@@ -415,7 +454,7 @@ TYPED_TEST(RnsGaloisKeyTest, GaloisKeyComposedApplication) {
 
   for (auto const& params :
        testing::GetRnsParametersForFiniteFieldEncoding<TypeParam>()) {
-    this->SetUpRnsParameters(params);
+    this->SetUpBgvParameters(params);
 
     ASSERT_OK_AND_ASSIGN(auto encoder,
                          Encoder::Create(this->rns_context_.get()));
@@ -462,6 +501,142 @@ TYPED_TEST(RnsGaloisKeyTest, GaloisKeyComposedApplication) {
     ASSERT_OK_AND_ASSIGN(
         auto decryptions,
         secret_key.template DecryptBgv<Encoder>(ciphertext_rot1, &encoder));
+
+    int group_size = num_coeffs / 2;
+    std::vector<Integer> expected;
+    for (int i = 0; i < group_size; ++i) {
+      int index = (i + 3) % group_size;
+      expected.push_back(values[index]);
+    }
+    for (int i = 0; i < group_size; ++i) {
+      int index = group_size + (i + 3) % group_size;
+      expected.push_back(values[index]);
+    }
+
+    EXPECT_EQ(decryptions, expected);
+  }
+}
+
+TYPED_TEST(RnsGaloisKeyTest, GaloisKeyForBfvCanRotateEncryptedSlots) {
+  using Encoder = FiniteFieldEncoder<TypeParam>;
+  using Integer = typename TypeParam::Int;
+
+  constexpr int k_power = 5;  // rotation by one slot.
+
+  for (auto const& params :
+       testing::GetBfvParametersForFiniteFieldEncoding<TypeParam>()) {
+    this->SetUpBfvParameters(params);
+
+    ASSERT_OK_AND_ASSIGN(auto encoder,
+                         Encoder::Create(this->rns_context_.get()));
+
+    ASSERT_OK_AND_ASSIGN(RnsRlweSecretKey<TypeParam> secret_key,
+                         this->SampleSecretKey());
+
+    auto gadget = this->gadget_.get();
+    auto prng = this->prng_.get();
+    Integer t = this->rns_context_->PlaintextModulus();
+    ASSERT_OK_AND_ASSIGN(
+        RnsGaloisKey<TypeParam> gk,
+        RnsGaloisKey<TypeParam>::CreateForBfv(secret_key, k_power, kVariance,
+                                              gadget, kPrngType));
+    ASSERT_EQ(gk.Gadget(), gadget);
+    ASSERT_EQ(gk.Dimension(), gadget->Dimension());
+    ASSERT_EQ(gk.SubstitutionPower(), k_power);
+
+    int num_coeffs = 1 << this->rns_context_->LogN();
+    std::vector<Integer> values =
+        testing::SampleMessages<Integer>(num_coeffs, t);
+    ASSERT_OK_AND_ASSIGN(
+        RnsBfvCiphertext<TypeParam> ciphertext,
+        secret_key.template EncryptBfv<Encoder>(
+            values, &encoder, this->error_params_.get(), prng));
+
+    // Apply the automorphism X -> X^k_power to the ciphertext, which is now
+    // encrypted under a secret key (1, s(X^k_power)). We use the Galois key
+    // to transform this ciphertext back to be encrypted under the canonical
+    // secret key (1, s(X)).
+    ASSERT_OK_AND_ASSIGN(auto ciphertext_sub, ciphertext.Substitute(k_power));
+    ASSERT_OK_AND_ASSIGN(auto ciphertext_rot, gk.ApplyTo(ciphertext_sub));
+
+    ASSERT_OK_AND_ASSIGN(
+        auto decryptions,
+        secret_key.template DecryptBfv<Encoder>(ciphertext_rot, &encoder));
+
+    // The slots are divided into two groups, and by applying the Galois key
+    // each group of the encrypted slots are rotated by 1 position.
+    int group_size = num_coeffs / 2;
+    std::vector<Integer> expected;
+    for (int i = 0; i < group_size; ++i) {
+      int index = (i + 1) % group_size;
+      expected.push_back(values[index]);
+    }
+    for (int i = 0; i < group_size; ++i) {
+      int index = group_size + (i + 1) % group_size;
+      expected.push_back(values[index]);
+    }
+
+    EXPECT_EQ(decryptions, expected);
+  }
+}
+
+// Checks that applying two Galois keys with substitution powers a, b, resp,
+// on a BFV ciphertext is equivalent to substituting X with X^(ab) on plaintext.
+TYPED_TEST(RnsGaloisKeyTest, GaloisKeyForBfvComposedApplication) {
+  using Encoder = FiniteFieldEncoder<TypeParam>;
+  using Integer = typename TypeParam::Int;
+
+  constexpr int k_power0 = 5;   // rotation by one slot.
+  constexpr int k_power1 = 25;  // rotation by two slots.
+
+  for (auto const& params :
+       testing::GetBfvParametersForFiniteFieldEncoding<TypeParam>()) {
+    this->SetUpBfvParameters(params);
+
+    ASSERT_OK_AND_ASSIGN(auto encoder,
+                         Encoder::Create(this->rns_context_.get()));
+
+    ASSERT_OK_AND_ASSIGN(RnsRlweSecretKey<TypeParam> secret_key,
+                         this->SampleSecretKey());
+
+    // Create two Galois keys with different substitution powers.
+    ASSERT_OK_AND_ASSIGN(
+        RnsGaloisKey<TypeParam> gk0,
+        RnsGaloisKey<TypeParam>::CreateForBfv(secret_key, k_power0, kVariance,
+                                              this->gadget_.get(), kPrngType));
+    ASSERT_OK_AND_ASSIGN(
+        RnsGaloisKey<TypeParam> gk1,
+        RnsGaloisKey<TypeParam>::CreateForBfv(secret_key, k_power1, kVariance,
+                                              this->gadget_.get(), kPrngType));
+
+    int num_coeffs = 1 << this->rns_context_->LogN();
+    Integer t = this->rns_context_->PlaintextModulus();
+    std::vector<Integer> values =
+        testing::SampleMessages<Integer>(num_coeffs, t);
+    auto prng = this->prng_.get();
+    ASSERT_OK_AND_ASSIGN(
+        RnsBfvCiphertext<TypeParam> ciphertext,
+        secret_key.template EncryptBfv<Encoder>(
+            values, &encoder, this->error_params_.get(), prng));
+
+    // Apply the first automorphism to the ciphertext and then apply the first
+    // Galois key.
+    ASSERT_OK_AND_ASSIGN(auto ciphertext_sub0, ciphertext.Substitute(k_power0));
+    ASSERT_OK_AND_ASSIGN(auto ciphertext_rot0, gk0.ApplyTo(ciphertext_sub0));
+    ASSERT_EQ(ciphertext_rot0.PowerOfS(), 1);
+
+    // Apply the second automorphism to the new ciphertext and then apply the
+    // second Galois key.
+    ASSERT_OK_AND_ASSIGN(auto ciphertext_sub1,
+                         ciphertext_rot0.Substitute(k_power1));
+    ASSERT_OK_AND_ASSIGN(auto ciphertext_rot1, gk1.ApplyTo(ciphertext_sub1));
+    ASSERT_EQ(ciphertext_rot1.PowerOfS(), 1);
+
+    // Now the last ciphertext should encrypt a slot vector that is rotated by
+    // the combined offset.
+    ASSERT_OK_AND_ASSIGN(
+        auto decryptions,
+        secret_key.template DecryptBfv<Encoder>(ciphertext_rot1, &encoder));
 
     int group_size = num_coeffs / 2;
     std::vector<Integer> expected;

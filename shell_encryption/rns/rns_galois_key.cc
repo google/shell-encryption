@@ -17,6 +17,7 @@
 
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "absl/numeric/int128.h"
@@ -28,7 +29,10 @@
 #include "shell_encryption/prng/prng.h"
 #include "shell_encryption/prng/single_thread_chacha_prng.h"
 #include "shell_encryption/prng/single_thread_hkdf_prng.h"
+#include "shell_encryption/rns/error_distribution.h"
+#include "shell_encryption/rns/rns_bfv_ciphertext.h"
 #include "shell_encryption/rns/rns_bgv_ciphertext.h"
+#include "shell_encryption/rns/rns_ciphertext.h"
 #include "shell_encryption/rns/rns_gadget.h"
 #include "shell_encryption/rns/rns_modulus.h"
 #include "shell_encryption/rns/rns_polynomial.h"
@@ -38,10 +42,10 @@
 namespace rlwe {
 
 template <typename ModularInt>
-absl::StatusOr<RnsGaloisKey<ModularInt>> RnsGaloisKey<ModularInt>::CreateForBgv(
+absl::StatusOr<RnsGaloisKey<ModularInt>> RnsGaloisKey<ModularInt>::Create(
     const RnsRlweSecretKey<ModularInt>& secret_key, int power, int variance,
-    const RnsGadget<ModularInt>* gadget, Integer plaintext_modulus,
-    PrngType prng_type) {
+    const RnsGadget<ModularInt>* gadget, PrngType prng_type,
+    Integer error_scalar) {
   int log_n = secret_key.LogN();
   int num_coeffs = 1 << log_n;
   if (power < 0 || (power % 2) == 0 || power >= 2 * num_coeffs) {
@@ -59,7 +63,7 @@ absl::StatusOr<RnsGaloisKey<ModularInt>> RnsGaloisKey<ModularInt>::CreateForBgv(
   // The source key s(X^power), which is the secret polynomial under which the
   // source ciphertexts are encrypted.
   auto moduli = secret_key.Moduli();
-  RnsPolynomial<ModularInt> target_key = secret_key.Key();
+  const RnsPolynomial<ModularInt>& target_key = secret_key.Key();
   RLWE_ASSIGN_OR_RETURN(auto source_key, target_key.Substitute(power, moduli));
 
   // Create the PRNGs for sampling the random polynomials in `key_as` and for
@@ -89,8 +93,10 @@ absl::StatusOr<RnsGaloisKey<ModularInt>> RnsGaloisKey<ModularInt>::CreateForBgv(
 
   // The Galois key is a k x 2 matrix [[b1, a1], ..., [bk, ak]], where
   // ai is uniformly random and bi = -ai * s + t * ei + gi * s(X^power), for
-  // gi = i'th component of the gadget. That is, conceptually, (bi, ai) is an
-  // encryption of the source secret s(X^power) under the target secret s(X).
+  // gi = i'th component of the gadget and t = `error_scalar`. That is,
+  // conceptually, (bi, ai) is an encryption of the source secret s(X^power)
+  // under the target secret s(X). Note that t should be the plaintext modulus
+  // for BGV, and it should be 1 for other schemes.
   int k = gadget->Dimension();
   std::vector<RnsPolynomial<ModularInt>> key_as;
   std::vector<RnsPolynomial<ModularInt>> key_bs;
@@ -109,7 +115,7 @@ absl::StatusOr<RnsGaloisKey<ModularInt>> RnsGaloisKey<ModularInt>::CreateForBgv(
     RLWE_ASSIGN_OR_RETURN(RnsPolynomial<ModularInt> b,
                           SampleError<ModularInt>(log_n, variance, moduli,
                                                   prng_encryption.get()));
-    RLWE_RETURN_IF_ERROR(b.MulInPlace(plaintext_modulus, moduli));
+    RLWE_RETURN_IF_ERROR(b.MulInPlace(error_scalar, moduli));
     RLWE_RETURN_IF_ERROR(b.AddInPlace(secret, moduli));
     RLWE_RETURN_IF_ERROR(b.FusedMulAddInPlace(u, target_key, moduli));
 
@@ -122,14 +128,14 @@ absl::StatusOr<RnsGaloisKey<ModularInt>> RnsGaloisKey<ModularInt>::CreateForBgv(
   std::vector<const PrimeModulus<ModularInt>*> moduli_vector;
   moduli_vector.insert(moduli_vector.begin(), moduli.begin(), moduli.end());
 
-  return RnsGaloisKey(std::move(key_as), std::move(key_bs), gadget,
-                      plaintext_modulus, power, std::move(moduli_vector),
-                      prng_pad_seed, prng_type);
+  return RnsGaloisKey(std::move(key_as), std::move(key_bs), gadget, power,
+                      std::move(moduli_vector), prng_pad_seed, prng_type);
 }
 
 template <typename ModularInt>
-absl::StatusOr<RnsBgvCiphertext<ModularInt>> RnsGaloisKey<ModularInt>::ApplyTo(
-    const RnsBgvCiphertext<ModularInt>& ciphertext) const {
+absl::StatusOr<std::vector<RnsPolynomial<ModularInt>>>
+RnsGaloisKey<ModularInt>::ApplyToRlweCiphertext(
+    const RnsRlweCiphertext<ModularInt>& ciphertext) const {
   if (ciphertext.PowerOfS() != power_) {
     return absl::InvalidArgumentError(
         "`ciphertext` does not have a matching substitution power.");
@@ -173,14 +179,44 @@ absl::StatusOr<RnsBgvCiphertext<ModularInt>> RnsGaloisKey<ModularInt>::ApplyTo(
   RLWE_ASSIGN_OR_RETURN(RnsPolynomial<ModularInt> c0, ciphertext.Component(0));
   RLWE_RETURN_IF_ERROR(c0_new.AddInPlace(c0, moduli_));
 
-  // Compute the error bound in the new ciphertext.
-  double error = ciphertext.Error() +
-                 ciphertext.ErrorParams()->BoundOnGadgetBasedKeySwitching(
-                     /*num_components=*/1, gadget_->LogGadgetBase(), k);
+  return std::vector<RnsPolynomial<ModularInt>>{std::move(c0_new),
+                                                std::move(c1_new)};
+}
 
-  return RnsBgvCiphertext<ModularInt>(
-      {std::move(c0_new), std::move(c1_new)}, moduli_,
-      /*power=*/1, error, ciphertext.ErrorParams());
+template <typename ModularInt>
+absl::StatusOr<RnsBgvCiphertext<ModularInt>> RnsGaloisKey<ModularInt>::ApplyTo(
+    const RnsBgvCiphertext<ModularInt>& ciphertext) const {
+  // First, key-switch the ciphertext as a generic RLWE ciphertext.
+  RLWE_ASSIGN_OR_RETURN(std::vector<RnsPolynomial<ModularInt>> components_new,
+                        ApplyToRlweCiphertext(ciphertext));
+
+  // Compute the error bound in the new ciphertext.
+  double error =
+      ciphertext.Error() +
+      ciphertext.ErrorParams()->BoundOnGadgetBasedKeySwitching(
+          /*num_components=*/1, gadget_->LogGadgetBase(), gadget_->Dimension());
+
+  return RnsBgvCiphertext<ModularInt>(std::move(components_new), moduli_,
+                                      /*power=*/1, error,
+                                      ciphertext.ErrorParams());
+}
+
+template <typename ModularInt>
+absl::StatusOr<RnsBfvCiphertext<ModularInt>> RnsGaloisKey<ModularInt>::ApplyTo(
+    const RnsBfvCiphertext<ModularInt>& ciphertext) const {
+  // First, key-switch the ciphertext as a generic RLWE ciphertext.
+  RLWE_ASSIGN_OR_RETURN(std::vector<RnsPolynomial<ModularInt>> components_new,
+                        ApplyToRlweCiphertext(ciphertext));
+
+  // Compute the error bound in the new ciphertext.
+  double error =
+      ciphertext.Error() +
+      ciphertext.ErrorParams()->BoundOnGadgetBasedKeySwitching(
+          /*num_components=*/1, gadget_->LogGadgetBase(), gadget_->Dimension());
+
+  return RnsBfvCiphertext<ModularInt>(
+      std::move(components_new), moduli_,
+      /*power=*/1, error, ciphertext.ErrorParams(), ciphertext.Context());
 }
 
 template class RnsGaloisKey<MontgomeryInt<Uint16>>;

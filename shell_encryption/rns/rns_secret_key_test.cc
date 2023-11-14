@@ -17,23 +17,22 @@
 
 #include <cmath>
 #include <memory>
+#include <utility>
 #include <vector>
 
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 #include "absl/log/check.h"
-#include "absl/random/random.h"
 #include "absl/status/status.h"
 #include "absl/strings/string_view.h"
 #include "absl/types/span.h"
-#include "shell_encryption/integral_types.h"
 #include "shell_encryption/prng/single_thread_hkdf_prng.h"
 #include "shell_encryption/rns/coefficient_encoder.h"
 #include "shell_encryption/rns/finite_field_encoder.h"
+#include "shell_encryption/rns/rns_bfv_ciphertext.h"
 #include "shell_encryption/rns/rns_bgv_ciphertext.h"
 #include "shell_encryption/rns/rns_context.h"
 #include "shell_encryption/rns/rns_error_params.h"
-#include "shell_encryption/rns/rns_integer.h"
 #include "shell_encryption/rns/rns_modulus.h"
 #include "shell_encryption/rns/rns_polynomial.h"
 #include "shell_encryption/rns/testing/parameters.h"
@@ -58,6 +57,13 @@ template <typename ModularInt>
 class RnsRlweSecretKeyTest : public ::testing::Test {
  protected:
   void SetUp() override {
+    // Create a PRNG for sampling secret key.
+    auto prng = Prng::Create(kPrngSeed.substr(0, Prng::SeedLength()));
+    CHECK(prng.ok());
+    prng_ = std::move(prng.value());
+  }
+
+  void SetUpBgvContext() {
     testing::RnsParameters<ModularInt> rns_params =
         testing::GetRnsParameters<ModularInt>();
 
@@ -84,11 +90,38 @@ class RnsRlweSecretKeyTest : public ::testing::Test {
     CHECK(error_params.ok());
     error_params_ = std::make_unique<const RnsErrorParams<ModularInt>>(
         std::move(error_params.value()));
+  }
 
-    // Create a PRNG for sampling secret key.
-    auto prng = Prng::Create(kPrngSeed.substr(0, Prng::SeedLength()));
-    CHECK(prng.ok());
-    prng_ = std::move(prng.value());
+  void SetUpBfvContext() {
+    testing::RnsParameters<ModularInt> rns_params =
+        testing::GetRnsParameters<ModularInt>();
+    if (rns_params.t % 2 == 0) {
+      rns_params.t++;
+    }
+
+    // Create the RNS context.
+    auto rns_context = RnsContext<ModularInt>::CreateForBfv(
+        rns_params.log_n, rns_params.qs, rns_params.ps, rns_params.t);
+    CHECK(rns_context.ok());
+    rns_context_ = std::make_unique<const RnsContext<ModularInt>>(
+        std::move(rns_context.value()));
+    main_moduli_ = rns_context_->MainPrimeModuli();
+
+    // Create the coefficient encoder.
+    auto coeff_encoder =
+        CoefficientEncoder<ModularInt>::Create(rns_context_.get());
+    CHECK(coeff_encoder.ok());
+    coeff_encoder_ = std::make_unique<const CoefficientEncoder<ModularInt>>(
+        std::move(coeff_encoder.value()));
+
+    // Create the error parameters.
+    int log_t = floor(std::log2(static_cast<double>(rns_params.t)));
+    auto error_params = RnsErrorParams<ModularInt>::Create(
+        rns_params.log_n, main_moduli_, /*aux_moduli=*/{}, log_t,
+        sqrt(kVariance));
+    CHECK(error_params.ok());
+    error_params_ = std::make_unique<const RnsErrorParams<ModularInt>>(
+        std::move(error_params.value()));
   }
 
   // Sample a secret key from prng.
@@ -108,6 +141,7 @@ class RnsRlweSecretKeyTest : public ::testing::Test {
 TYPED_TEST_SUITE(RnsRlweSecretKeyTest, testing::ModularIntTypes);
 
 TYPED_TEST(RnsRlweSecretKeyTest, SampleFailsIfLogNIsNotPositive) {
+  this->SetUpBgvContext();
   EXPECT_THAT(
       RnsRlweSecretKey<TypeParam>::Sample(
           /*log_n=*/-1, kVariance, this->main_moduli_, this->prng_.get()),
@@ -121,6 +155,7 @@ TYPED_TEST(RnsRlweSecretKeyTest, SampleFailsIfLogNIsNotPositive) {
 }
 
 TYPED_TEST(RnsRlweSecretKeyTest, SampleFailsIfVarianceIsNotPositive) {
+  this->SetUpBgvContext();
   EXPECT_THAT(RnsRlweSecretKey<TypeParam>::Sample(
                   this->rns_context_->LogN(), /*variance=*/-1,
                   this->main_moduli_, this->prng_.get()),
@@ -134,6 +169,7 @@ TYPED_TEST(RnsRlweSecretKeyTest, SampleFailsIfVarianceIsNotPositive) {
 }
 
 TYPED_TEST(RnsRlweSecretKeyTest, SampleFailsIfModuliIsEmpty) {
+  this->SetUpBgvContext();
   EXPECT_THAT(
       RnsRlweSecretKey<TypeParam>::Sample(this->rns_context_->LogN(), kVariance,
                                           /*moduli=*/{}, nullptr),
@@ -142,6 +178,7 @@ TYPED_TEST(RnsRlweSecretKeyTest, SampleFailsIfModuliIsEmpty) {
 }
 
 TYPED_TEST(RnsRlweSecretKeyTest, SampleFailsIfPrngIsNull) {
+  this->SetUpBgvContext();
   EXPECT_THAT(RnsRlweSecretKey<TypeParam>::Sample(
                   this->rns_context_->LogN(), kVariance,
                   this->rns_context_->MainPrimeModuli(), /*prng=*/nullptr),
@@ -150,6 +187,7 @@ TYPED_TEST(RnsRlweSecretKeyTest, SampleFailsIfPrngIsNull) {
 }
 
 TYPED_TEST(RnsRlweSecretKeyTest, SampleSucceeds) {
+  this->SetUpBgvContext();
   ASSERT_OK_AND_ASSIGN(
       RnsRlweSecretKey<TypeParam> key,
       RnsRlweSecretKey<TypeParam>::Sample(this->rns_context_->LogN(), kVariance,
@@ -170,6 +208,7 @@ TYPED_TEST(RnsRlweSecretKeyTest, SampleSucceeds) {
 }
 
 TYPED_TEST(RnsRlweSecretKeyTest, KeyCoefficientsAreBoundedAndConsistent) {
+  this->SetUpBgvContext();
   ASSERT_OK_AND_ASSIGN(RnsRlweSecretKey<TypeParam> key, this->SampleKey());
   // Get a copy of key polynomial s, where the canonical secret key is (1, s).
   RnsPolynomial<TypeParam> s = key.Key();
@@ -209,6 +248,7 @@ TYPED_TEST(RnsRlweSecretKeyTest, KeyCoefficientsAreBoundedAndConsistent) {
 }
 
 TYPED_TEST(RnsRlweSecretKeyTest, EncryptBgvFailsIfEncoderIsNull) {
+  this->SetUpBgvContext();
   ASSERT_OK_AND_ASSIGN(RnsRlweSecretKey<TypeParam> key, this->SampleKey());
   EXPECT_THAT(key.template EncryptBgv<CoefficientEncoder<TypeParam>>(
                   /*messages=*/{}, /*encoder=*/nullptr,
@@ -218,6 +258,7 @@ TYPED_TEST(RnsRlweSecretKeyTest, EncryptBgvFailsIfEncoderIsNull) {
 }
 
 TYPED_TEST(RnsRlweSecretKeyTest, EncryptBgvFailsIfErrorParamsIsNull) {
+  this->SetUpBgvContext();
   ASSERT_OK_AND_ASSIGN(RnsRlweSecretKey<TypeParam> key, this->SampleKey());
   EXPECT_THAT(key.EncryptBgv(/*messages=*/{}, this->coeff_encoder_.get(),
                              /*error_params=*/nullptr, this->prng_.get()),
@@ -226,6 +267,7 @@ TYPED_TEST(RnsRlweSecretKeyTest, EncryptBgvFailsIfErrorParamsIsNull) {
 }
 
 TYPED_TEST(RnsRlweSecretKeyTest, EncryptBgvFailsIfPrngIsNull) {
+  this->SetUpBgvContext();
   ASSERT_OK_AND_ASSIGN(RnsRlweSecretKey<TypeParam> key, this->SampleKey());
   EXPECT_THAT(key.EncryptBgv(/*messages=*/{}, this->coeff_encoder_.get(),
                              this->error_params_.get(), /*prng=*/nullptr),
@@ -234,6 +276,7 @@ TYPED_TEST(RnsRlweSecretKeyTest, EncryptBgvFailsIfPrngIsNull) {
 }
 
 TYPED_TEST(RnsRlweSecretKeyTest, DecryptBgvFailsIfCiphertextPowerOfSIsNotOne) {
+  this->SetUpBgvContext();
   ASSERT_OK_AND_ASSIGN(RnsRlweSecretKey<TypeParam> key, this->SampleKey());
 
   // Create a ciphertext with power_of_s == 1.
@@ -255,6 +298,7 @@ TYPED_TEST(RnsRlweSecretKeyTest, DecryptBgvFailsIfCiphertextPowerOfSIsNotOne) {
 
 TYPED_TEST(RnsRlweSecretKeyTest,
            DecryptBgvFailsIfCiphertextHasMismatchPolyDegree) {
+  this->SetUpBgvContext();
   ASSERT_OK_AND_ASSIGN(RnsRlweSecretKey<TypeParam> key, this->SampleKey());
 
   // Create a ciphertext with log_n that's different from the secret key.
@@ -274,6 +318,7 @@ TYPED_TEST(RnsRlweSecretKeyTest,
 
 TYPED_TEST(RnsRlweSecretKeyTest,
            DecryptBgvFailsIfCiphertextHasMismatchNumberOfModuli) {
+  this->SetUpBgvContext();
   // This test requires at least two RNS moduli.
   if (this->main_moduli_.size() <= 1) {
     return;
@@ -301,6 +346,7 @@ TYPED_TEST(RnsRlweSecretKeyTest,
 
 TYPED_TEST(RnsRlweSecretKeyTest, EncryptBgvDecrypts) {
   using Integer = typename TypeParam::Int;
+  this->SetUpBgvContext();
   ASSERT_OK_AND_ASSIGN(RnsRlweSecretKey<TypeParam> key, this->SampleKey());
   int log_n = this->rns_context_->LogN();
   Integer t = this->rns_context_->PlaintextModulus();
@@ -315,189 +361,9 @@ TYPED_TEST(RnsRlweSecretKeyTest, EncryptBgvDecrypts) {
   EXPECT_EQ(dec_messages, messages);
 }
 
-TYPED_TEST(RnsRlweSecretKeyTest, DecryptBgvOnModReducedCiphertext) {
-  using Integer = typename TypeParam::Int;
-  if (this->main_moduli_.size() < 2) {
-    // There is only one prime modulus in the moduli chain, so we cannot perform
-    // modulus reduction further.
-    return;
-  }
-
-  ASSERT_OK_AND_ASSIGN(RnsRlweSecretKey<TypeParam> key, this->SampleKey());
-
-  // Sample a plaintext polynomial and encrypt it wrt the full moduli chain.
-  Integer t = this->rns_context_->PlaintextModulus();
-  std::vector<Integer> messages =
-      testing::SampleMessages(1 << this->rns_context_->LogN(), t);
-  ASSERT_OK_AND_ASSIGN(
-      RnsBgvCiphertext<TypeParam> ciphertext,
-      key.EncryptBgv(messages, this->coeff_encoder_.get(),
-                     this->error_params_.get(), this->prng_.get()));
-
-  // ModReduce the ciphertext and get round(Q/q_L * ciphertext) mod (Q/q_L).
-  auto q_inv_mod_qs = this->rns_context_->MainPrimeModulusInverseResidues();
-
-  int level = ciphertext.Level();
-  int degree = ciphertext.Degree();
-  RnsInt<TypeParam> ql_inv = q_inv_mod_qs[level].Prefix(level);
-  ASSERT_OK(ciphertext.ModReduce(t, ql_inv));
-  ASSERT_EQ(ciphertext.Level(), level - 1);  // level should be reduced by 1
-  ASSERT_EQ(ciphertext.Degree(), degree);    // degree should not change
-
-  // We also need to modulus reduce the secret key.
-  ASSERT_OK(key.ModReduce());
-  ASSERT_EQ(key.Level(), level - 1);  // key level should match the ciphertext
-
-  ASSERT_OK_AND_ASSIGN(std::vector<Integer> dec_messages,
-                       key.DecryptBgv(ciphertext, this->coeff_encoder_.get()));
-  EXPECT_EQ(dec_messages, messages);
-}
-
-TYPED_TEST(RnsRlweSecretKeyTest, DecryptBgvOnNegatedCiphertext) {
-  using Integer = typename TypeParam::Int;
-
-  ASSERT_OK_AND_ASSIGN(RnsRlweSecretKey<TypeParam> key, this->SampleKey());
-
-  // Sample a plaintext polynomial and encrypt it.
-  Integer t = this->rns_context_->PlaintextModulus();
-  std::vector<Integer> messages =
-      testing::SampleMessages(1 << this->rns_context_->LogN(), t);
-  ASSERT_OK_AND_ASSIGN(
-      RnsBgvCiphertext<TypeParam> ciphertext,
-      key.EncryptBgv(messages, this->coeff_encoder_.get(),
-                     this->error_params_.get(), this->prng_.get()));
-
-  // Homomorphically negate the ciphertext.
-  ASSERT_OK_AND_ASSIGN(RnsBgvCiphertext<TypeParam> ciphertext_neg,
-                       ciphertext.Negate());
-
-  // The negated ciphertext should decrypt to negated plaintext.
-  ASSERT_OK_AND_ASSIGN(
-      std::vector<Integer> dec_neg_messages,
-      key.DecryptBgv(ciphertext_neg, this->coeff_encoder_.get()));
-  ASSERT_EQ(dec_neg_messages.size(), messages.size());
-  for (int i = 0; i < messages.size(); ++i) {
-    Integer expected = (t - messages[i]) % t;  // -messages[i] (mod t).
-    EXPECT_EQ(dec_neg_messages[i], expected);
-  }
-
-  // The sum of two ciphertexts should decrypt to zero.
-  ASSERT_OK_AND_ASSIGN(RnsBgvCiphertext<TypeParam> ciphertext_sum,
-                       ciphertext + ciphertext_neg);
-  ASSERT_OK_AND_ASSIGN(
-      std::vector<Integer> dec_sum_messages,
-      key.DecryptBgv(ciphertext_sum, this->coeff_encoder_.get()));
-  ASSERT_EQ(dec_sum_messages.size(), messages.size());
-  for (int i = 0; i < dec_sum_messages.size(); ++i) {
-    EXPECT_EQ(dec_sum_messages[i], 0);
-  }
-}
-
-TYPED_TEST(RnsRlweSecretKeyTest, DecryptBgvOnSum) {
-  using Integer = typename TypeParam::Int;
-
-  ASSERT_OK_AND_ASSIGN(RnsRlweSecretKey<TypeParam> key, this->SampleKey());
-  const CoefficientEncoder<TypeParam>* encoder = this->coeff_encoder_.get();
-
-  // Sample two plaintext polynomials and encrypt them.
-  int num_coeffs = 1 << this->rns_context_->LogN();
-  Integer t = this->rns_context_->PlaintextModulus();
-  std::vector<Integer> messages0 = testing::SampleMessages(num_coeffs, t);
-  std::vector<Integer> messages1 = testing::SampleMessages(num_coeffs, t);
-  ASSERT_OK_AND_ASSIGN(
-      RnsBgvCiphertext<TypeParam> ciphertext0,
-      key.EncryptBgv(messages0, this->coeff_encoder_.get(),
-                     this->error_params_.get(), this->prng_.get()));
-  ASSERT_OK_AND_ASSIGN(
-      RnsBgvCiphertext<TypeParam> ciphertext1,
-      key.EncryptBgv(messages1, this->coeff_encoder_.get(),
-                     this->error_params_.get(), this->prng_.get()));
-
-  // Homomorphically add the two ciphertexts.
-  ASSERT_OK_AND_ASSIGN(RnsBgvCiphertext<TypeParam> ciphertext_sum,
-                       ciphertext0 + ciphertext1);
-
-  // The ciphertext should decrypt to the sum of messages (mod t).
-  ASSERT_OK_AND_ASSIGN(std::vector<Integer> dec_sum_messages,
-                       key.DecryptBgv(ciphertext_sum, encoder));
-  ASSERT_EQ(dec_sum_messages.size(), num_coeffs);
-  for (int i = 0; i < num_coeffs; ++i) {
-    Integer expected = (messages0[i] + messages1[i]) % t;
-    EXPECT_EQ(dec_sum_messages[i], expected);
-  }
-
-  // Encode `messages1` to a plaintext polynomial and homomorphically add it to
-  // `ciphertext0`.
-  ASSERT_OK_AND_ASSIGN(RnsPolynomial<TypeParam> plaintext1,
-                       encoder->EncodeBgv(messages1, this->main_moduli_));
-  ASSERT_OK(plaintext1.ConvertToNttForm(this->main_moduli_));
-  ASSERT_OK_AND_ASSIGN(RnsBgvCiphertext<TypeParam> ciphertext_sum_plaintext,
-                       ciphertext0 + plaintext1);
-
-  // This ciphertext should also decrypt to the sum of messages (mod t).
-  ASSERT_OK_AND_ASSIGN(std::vector<Integer> dec_sum_plaintext_messages,
-                       key.DecryptBgv(ciphertext_sum_plaintext, encoder));
-  ASSERT_EQ(dec_sum_plaintext_messages.size(), num_coeffs);
-  for (int i = 0; i < num_coeffs; ++i) {
-    Integer expected = (messages0[i] + messages1[i]) % t;
-    EXPECT_EQ(dec_sum_plaintext_messages[i], expected);
-  }
-}
-
-TYPED_TEST(RnsRlweSecretKeyTest, DecryptBgvOnDiff) {
-  using Integer = typename TypeParam::Int;
-
-  ASSERT_OK_AND_ASSIGN(RnsRlweSecretKey<TypeParam> key, this->SampleKey());
-  const CoefficientEncoder<TypeParam>* encoder = this->coeff_encoder_.get();
-
-  // Sample two plaintext polynomials and encrypt them.
-  int num_coeffs = 1 << this->rns_context_->LogN();
-  Integer t = this->rns_context_->PlaintextModulus();
-  std::vector<Integer> messages0 = testing::SampleMessages(num_coeffs, t);
-  std::vector<Integer> messages1 = testing::SampleMessages(num_coeffs, t);
-  ASSERT_OK_AND_ASSIGN(
-      RnsBgvCiphertext<TypeParam> ciphertext0,
-      key.EncryptBgv(messages0, this->coeff_encoder_.get(),
-                     this->error_params_.get(), this->prng_.get()));
-  ASSERT_OK_AND_ASSIGN(
-      RnsBgvCiphertext<TypeParam> ciphertext1,
-      key.EncryptBgv(messages1, this->coeff_encoder_.get(),
-                     this->error_params_.get(), this->prng_.get()));
-
-  // Homomorphically subtract the two ciphertexts.
-  ASSERT_OK_AND_ASSIGN(RnsBgvCiphertext<TypeParam> ciphertext_diff,
-                       ciphertext0 - ciphertext1);
-
-  // The ciphertext should decrypt to the difference of messages (mod t).
-  ASSERT_OK_AND_ASSIGN(std::vector<Integer> dec_diff_messages,
-                       key.DecryptBgv(ciphertext_diff, encoder));
-  ASSERT_EQ(dec_diff_messages.size(), num_coeffs);
-  for (int i = 0; i < num_coeffs; ++i) {
-    Integer expected = (t + messages0[i] - messages1[i]) % t;
-    EXPECT_EQ(dec_diff_messages[i], expected);
-  }
-
-  // Encode `messages1` to a plaintext polynomial and homomorphically add it to
-  // `ciphertext0`.
-  ASSERT_OK_AND_ASSIGN(RnsPolynomial<TypeParam> plaintext1,
-                       encoder->EncodeBgv(messages1, this->main_moduli_));
-  ASSERT_OK(plaintext1.ConvertToNttForm(this->main_moduli_));
-  ASSERT_OK_AND_ASSIGN(RnsBgvCiphertext<TypeParam> ciphertext_diff_plaintext,
-                       ciphertext0 - plaintext1);
-
-  // This ciphertext should also decrypt to the diff of messages (mod t).
-  ASSERT_OK_AND_ASSIGN(std::vector<Integer> dec_diff_plaintext_messages,
-                       key.DecryptBgv(ciphertext_diff_plaintext, encoder));
-  ASSERT_EQ(dec_diff_plaintext_messages.size(), num_coeffs);
-  for (int i = 0; i < num_coeffs; ++i) {
-    Integer expected = (t + messages0[i] - messages1[i]) % t;
-    EXPECT_EQ(dec_diff_plaintext_messages[i], expected);
-  }
-}
-
 TYPED_TEST(RnsRlweSecretKeyTest, DecryptBgvOnDegreeTwoCiphertext) {
   using Integer = typename TypeParam::Int;
-
+  this->SetUpBgvContext();
   double expected_error_bound = this->error_params_->B_secretkey_encryption() *
                                 this->error_params_->B_secretkey_encryption();
   if (expected_error_bound >=
@@ -551,6 +417,142 @@ TYPED_TEST(RnsRlweSecretKeyTest, DecryptBgvOnDegreeTwoCiphertext) {
   EXPECT_EQ(dec_messages, expected_messages);
 }
 
+TYPED_TEST(RnsRlweSecretKeyTest, EncryptBfvFailsIfEncoderIsNull) {
+  this->SetUpBfvContext();
+  ASSERT_OK_AND_ASSIGN(RnsRlweSecretKey<TypeParam> key, this->SampleKey());
+  EXPECT_THAT(key.template EncryptBfv<CoefficientEncoder<TypeParam>>(
+                  /*messages=*/{}, /*encoder=*/nullptr,
+                  this->error_params_.get(), this->prng_.get()),
+              StatusIs(absl::StatusCode::kInvalidArgument,
+                       HasSubstr("`encoder` must not be null")));
+}
+
+TYPED_TEST(RnsRlweSecretKeyTest, EncryptBfvFailsIfErrorParamsIsNull) {
+  this->SetUpBfvContext();
+  ASSERT_OK_AND_ASSIGN(RnsRlweSecretKey<TypeParam> key, this->SampleKey());
+  EXPECT_THAT(key.EncryptBfv(/*messages=*/{}, this->coeff_encoder_.get(),
+                             /*error_params=*/nullptr, this->prng_.get()),
+              StatusIs(absl::StatusCode::kInvalidArgument,
+                       HasSubstr("`error_params` must not be null")));
+}
+
+TYPED_TEST(RnsRlweSecretKeyTest, EncryptBfvFailsIfPrngIsNull) {
+  this->SetUpBfvContext();
+  ASSERT_OK_AND_ASSIGN(RnsRlweSecretKey<TypeParam> key, this->SampleKey());
+  EXPECT_THAT(key.EncryptBfv(/*messages=*/{}, this->coeff_encoder_.get(),
+                             this->error_params_.get(), /*prng=*/nullptr),
+              StatusIs(absl::StatusCode::kInvalidArgument,
+                       HasSubstr("`prng` must not be null")));
+}
+
+TYPED_TEST(RnsRlweSecretKeyTest, DecryptBfvFailsIfCiphertextPowerOfSIsNotOne) {
+  this->SetUpBfvContext();
+  ASSERT_OK_AND_ASSIGN(RnsRlweSecretKey<TypeParam> key, this->SampleKey());
+
+  // Create a ciphertext with power_of_s == 1.
+  ASSERT_OK_AND_ASSIGN(auto zero,
+                       RnsPolynomial<TypeParam>::CreateZero(
+                           this->rns_context_->LogN(), this->main_moduli_));
+  RnsBfvCiphertext<TypeParam> ciphertext(
+      /*components=*/{zero, zero}, this->main_moduli_,
+      /*power_of_s=*/5, /*error=*/0, this->error_params_.get(),
+      this->rns_context_.get());
+  ASSERT_EQ(ciphertext.PowerOfS(), 5);
+
+  EXPECT_THAT(
+      key.DecryptBfv(ciphertext, this->coeff_encoder_.get()),
+      StatusIs(
+          absl::StatusCode::kInvalidArgument,
+          HasSubstr(
+              "Cannot decrypt `ciphertext` with power of s not equal to 1.")));
+}
+
+TYPED_TEST(RnsRlweSecretKeyTest,
+           DecryptBfvFailsIfCiphertextHasMismatchPolyDegree) {
+  this->SetUpBfvContext();
+  ASSERT_OK_AND_ASSIGN(RnsRlweSecretKey<TypeParam> key, this->SampleKey());
+
+  // Create a ciphertext with log_n that's different from the secret key.
+  int log_n = this->rns_context_->LogN();
+  ASSERT_OK_AND_ASSIGN(auto zero, RnsPolynomial<TypeParam>::CreateZero(
+                                      log_n - 1, this->main_moduli_));
+  RnsBfvCiphertext<TypeParam> ciphertext(
+      /*components=*/{zero, zero}, this->main_moduli_,
+      /*power_of_s=*/1, /*error=*/0, this->error_params_.get(),
+      this->rns_context_.get());
+  ASSERT_EQ(ciphertext.LogN(), log_n - 1);
+
+  EXPECT_THAT(key.DecryptBfv(ciphertext, this->coeff_encoder_.get()),
+              StatusIs(absl::StatusCode::kInvalidArgument,
+                       HasSubstr("Cannot decrypt `ciphertext` with a "
+                                 "mismatching polynomial degree.")));
+}
+
+TYPED_TEST(RnsRlweSecretKeyTest,
+           DecryptBfvFailsIfCiphertextHasMismatchNumberOfModuli) {
+  this->SetUpBfvContext();
+  // This test requires at least two RNS moduli.
+  if (this->main_moduli_.size() <= 1) {
+    return;
+  }
+
+  ASSERT_OK_AND_ASSIGN(RnsRlweSecretKey<TypeParam> key, this->SampleKey());
+
+  // Create a ciphertext with fewer number of RNS moduli.
+  int log_n = this->rns_context_->LogN();
+  int level = this->main_moduli_.size() - 1;
+  auto moduli_reduced = this->main_moduli_;
+  moduli_reduced.pop_back();
+  ASSERT_OK_AND_ASSIGN(
+      auto zero, RnsPolynomial<TypeParam>::CreateZero(log_n, moduli_reduced));
+  RnsBfvCiphertext<TypeParam> ciphertext(
+      /*components=*/{zero, zero}, moduli_reduced,
+      /*power_of_s=*/1, /*error=*/0, this->error_params_.get(),
+      this->rns_context_.get());
+  ASSERT_EQ(ciphertext.NumModuli(), level);
+
+  EXPECT_THAT(key.DecryptBfv(ciphertext, this->coeff_encoder_.get()),
+              StatusIs(absl::StatusCode::kInvalidArgument,
+                       HasSubstr("Cannot decrypt `ciphertext` with a "
+                                 "mismatching number of prime moduli.")));
+}
+
+TYPED_TEST(RnsRlweSecretKeyTest, DecryptBfvFailsIfEncoderIsNull) {
+  using Encoder = CoefficientEncoder<TypeParam>;
+  this->SetUpBfvContext();
+  ASSERT_OK_AND_ASSIGN(RnsRlweSecretKey<TypeParam> key, this->SampleKey());
+
+  ASSERT_OK_AND_ASSIGN(auto zero,
+                       RnsPolynomial<TypeParam>::CreateZero(
+                           this->rns_context_->LogN(), this->main_moduli_));
+  RnsBfvCiphertext<TypeParam> ciphertext(
+      /*components=*/{zero, zero}, this->main_moduli_,
+      /*power_of_s=*/1, /*error=*/0, this->error_params_.get(),
+      this->rns_context_.get());
+
+  EXPECT_THAT(key.template DecryptBfv<Encoder>(ciphertext, /*encoder=*/nullptr),
+              StatusIs(absl::StatusCode::kInvalidArgument,
+                       HasSubstr("`encoder` must not be null")));
+}
+
+TYPED_TEST(RnsRlweSecretKeyTest, EncryptBfvDecrypts) {
+  using Integer = typename TypeParam::Int;
+  this->SetUpBfvContext();
+  ASSERT_OK_AND_ASSIGN(RnsRlweSecretKey<TypeParam> key, this->SampleKey());
+  int log_n = this->rns_context_->LogN();
+  Integer t = this->rns_context_->PlaintextModulus();
+  std::vector<Integer> messages = testing::SampleMessages(1 << log_n, t);
+
+  ASSERT_OK_AND_ASSIGN(
+      RnsBfvCiphertext<TypeParam> ciphertext,
+      key.EncryptBfv(messages, this->coeff_encoder_.get(),
+                     this->error_params_.get(), this->prng_.get()));
+
+  ASSERT_OK_AND_ASSIGN(std::vector<Integer> dec_messages,
+                       key.DecryptBfv(ciphertext, this->coeff_encoder_.get()));
+  EXPECT_EQ(dec_messages, messages);
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 // Encrypt with finite field encoder
 ////////////////////////////////////////////////////////////////////////////////
@@ -565,10 +567,10 @@ class RnsRlweSecretKeyPackedTest : public ::testing::Test {
     prng_ = std::move(prng.value());
   }
 
-  void SetUpRnsParameters(const testing::RnsParameters<ModularInt>& params) {
+  void SetUpBgvRnsParameters(const testing::RnsParameters<ModularInt>& params) {
     // Use parameters suitable for finite field encoding.
-    auto rns_context = RnsContext<ModularInt>::Create(params.log_n, params.qs,
-                                                      params.ps, params.t);
+    auto rns_context = RnsContext<ModularInt>::CreateForBgvFiniteFieldEncoding(
+        params.log_n, params.qs, params.ps, params.t);
     CHECK(rns_context.ok());
     rns_context_ = std::make_unique<const RnsContext<ModularInt>>(
         std::move(rns_context.value()));
@@ -589,11 +591,43 @@ class RnsRlweSecretKeyPackedTest : public ::testing::Test {
         std::move(encoder.value()));
   }
 
-  void SetUpDefaultRnsParameters() {
+  void SetUpBfvRnsParameters(const testing::RnsParameters<ModularInt>& params) {
+    // Use parameters suitable for finite field encoding.
+    auto rns_context = RnsContext<ModularInt>::CreateForBfvFiniteFieldEncoding(
+        params.log_n, params.qs, params.ps, params.t);
+    CHECK(rns_context.ok());
+    rns_context_ = std::make_unique<const RnsContext<ModularInt>>(
+        std::move(rns_context.value()));
+    main_moduli_ = rns_context_->MainPrimeModuli();
+    aux_moduli_ = rns_context_->AuxPrimeModuli();
+
+    // Create the error parameters.
+    int log_t = floor(std::log2(static_cast<double>(params.t)));
+    auto error_params = RnsErrorParams<ModularInt>::Create(
+        params.log_n, main_moduli_, /*aux_moduli=*/{}, log_t, sqrt(kVariance));
+    CHECK(error_params.ok());
+    error_params_ = std::make_unique<const RnsErrorParams<ModularInt>>(
+        std::move(error_params.value()));
+
+    // Create a finite field encoder.
+    auto encoder = FiniteFieldEncoder<ModularInt>::Create(rns_context_.get());
+    CHECK(encoder.ok());
+    encoder_ = std::make_unique<const FiniteFieldEncoder<ModularInt>>(
+        std::move(encoder.value()));
+  }
+
+  void SetUpDefaultBgvRnsParameters() {
     auto all_params =
         testing::GetRnsParametersForFiniteFieldEncoding<ModularInt>();
     CHECK(!all_params.empty());
-    SetUpRnsParameters(all_params[0]);
+    SetUpBgvRnsParameters(all_params[0]);
+  }
+
+  void SetUpDefaultBfvRnsParameters() {
+    auto all_params =
+        testing::GetBfvParametersForFiniteFieldEncoding<ModularInt>();
+    CHECK(!all_params.empty());
+    SetUpBfvRnsParameters(all_params[0]);
   }
 
   // Sample a secret key from prng.
@@ -629,6 +663,7 @@ class RnsRlweSecretKeyPackedTest : public ::testing::Test {
 
   std::unique_ptr<const RnsContext<ModularInt>> rns_context_;
   std::vector<const PrimeModulus<ModularInt>*> main_moduli_;
+  std::vector<const PrimeModulus<ModularInt>*> aux_moduli_;
   std::unique_ptr<const FiniteFieldEncoder<ModularInt>> encoder_;
   std::unique_ptr<const RnsErrorParams<ModularInt>> error_params_;
   std::unique_ptr<Prng> prng_;
@@ -641,7 +676,7 @@ TYPED_TEST(RnsRlweSecretKeyPackedTest, EncryptBgvDecrypts) {
   using Integer = typename TypeParam::Int;
   for (auto const& params :
        testing::GetRnsParametersForFiniteFieldEncoding<TypeParam>()) {
-    this->SetUpRnsParameters(params);
+    this->SetUpBgvRnsParameters(params);
     int log_n = this->rns_context_->LogN();
     ASSERT_OK_AND_ASSIGN(RnsRlweSecretKey<TypeParam> key, this->SampleKey());
 
@@ -663,103 +698,12 @@ TYPED_TEST(RnsRlweSecretKeyPackedTest, EncryptBgvDecrypts) {
   }
 }
 
-TYPED_TEST(RnsRlweSecretKeyPackedTest, CiphertextMulWithPlaintext) {
-  using Integer = typename TypeParam::Int;
-  for (auto const& params :
-       testing::GetRnsParametersForFiniteFieldEncoding<TypeParam>()) {
-    this->SetUpRnsParameters(params);
-    int log_n = this->rns_context_->LogN();
-    ASSERT_OK_AND_ASSIGN(RnsRlweSecretKey<TypeParam> key, this->SampleKey());
-
-    Integer t = this->rns_context_->PlaintextModulus();
-    std::vector<Integer> messages = testing::SampleMessages(1 << log_n, t);
-    ASSERT_OK_AND_ASSIGN(RnsBgvCiphertext<TypeParam> ciphertext,
-                         key.template EncryptBgv<FiniteFieldEncoder<TypeParam>>(
-                             messages, this->encoder_.get(),
-                             this->error_params_.get(), this->prng_.get()));
-
-    // Multiply the ciphertext with a plaintext polynomial that encodes a
-    // projection vector.
-    std::vector<Integer> projections(1 << log_n, 0);
-    for (int i = 0; i < (1 << log_n); i += 2) {
-      projections[i] = 1;
-    }
-    ASSERT_OK_AND_ASSIGN(
-        RnsPolynomial<TypeParam> plaintext,
-        this->encoder_->EncodeBgv(projections, this->main_moduli_));
-
-    ASSERT_OK(ciphertext.AbsorbInPlace(plaintext));
-
-    ASSERT_OK_AND_ASSIGN(std::vector<Integer> dec_messages,
-                         key.template DecryptBgv<FiniteFieldEncoder<TypeParam>>(
-                             ciphertext, this->encoder_.get()));
-    for (int i = 0; i < (1 << log_n); ++i) {
-      EXPECT_EQ(dec_messages[i], messages[i] * projections[i]);
-    }
-  }
-}
-
-TYPED_TEST(RnsRlweSecretKeyPackedTest, CiphertextMulWithCiphertext) {
-  using Integer = typename TypeParam::Int;
-  for (auto const& params :
-       testing::GetRnsParametersForFiniteFieldEncoding<TypeParam>()) {
-    this->SetUpRnsParameters(params);
-
-    int log_n = this->rns_context_->LogN();
-    double expected_error_bound =
-        this->error_params_->B_secretkey_encryption() *
-        this->error_params_->B_secretkey_encryption() * sqrt(1 << log_n);
-    double composite_modulus = 1;
-    for (auto prime_modulus : this->main_moduli_) {
-      composite_modulus *= static_cast<double>(prime_modulus->Modulus());
-    }
-    if (expected_error_bound >= composite_modulus) {
-      // The test parameters are not suitable for homomorphic multiplication as
-      // the error in the product ciphertext is expected to be larger than the
-      // ciphertext modulus.
-      return;
-    }
-
-    ASSERT_OK_AND_ASSIGN(RnsRlweSecretKey<TypeParam> key, this->SampleKey());
-
-    Integer t = this->rns_context_->PlaintextModulus();
-    std::vector<Integer> messages0 = testing::SampleMessages(1 << log_n, t);
-    std::vector<Integer> messages1 = testing::SampleMessages(1 << log_n, t);
-    ASSERT_OK_AND_ASSIGN(RnsBgvCiphertext<TypeParam> ciphertext0,
-                         key.template EncryptBgv<FiniteFieldEncoder<TypeParam>>(
-                             messages0, this->encoder_.get(),
-                             this->error_params_.get(), this->prng_.get()));
-    ASSERT_OK_AND_ASSIGN(RnsBgvCiphertext<TypeParam> ciphertext1,
-                         key.template EncryptBgv<FiniteFieldEncoder<TypeParam>>(
-                             messages1, this->encoder_.get(),
-                             this->error_params_.get(), this->prng_.get()));
-
-    // Multiply the two ciphertexts, and the result is a degree 2 ciphertext.
-    ASSERT_OK_AND_ASSIGN(RnsBgvCiphertext<TypeParam> ciphertext_product,
-                         ciphertext0 * ciphertext1);
-    EXPECT_EQ(ciphertext_product.Degree(), 2);
-    EXPECT_EQ(ciphertext_product.Level(), ciphertext0.Level());
-
-    // Decrypt the product ciphertext, and expect the result is the pointwise
-    // product of messages0 and messages1.
-    ASSERT_OK_AND_ASSIGN(std::vector<Integer> dec_messages,
-                         key.template DecryptBgv<FiniteFieldEncoder<TypeParam>>(
-                             ciphertext_product, this->encoder_.get()));
-    for (int i = 0; i < (1 << log_n); ++i) {
-      // Both messages0 and messages1 contains numbers mod t, and since the
-      // plaintext modulus t is chosen to be sufficiently small, we can multiply
-      // two messages without overflow the int type.
-      EXPECT_EQ(dec_messages[i], (messages0[i] * messages1[i]) % t);
-    }
-  }
-}
-
 TYPED_TEST(RnsRlweSecretKeyPackedTest, EncryptBgvCrtDecrypts) {
   using Integer = typename TypeParam::Int;
   using BigInteger = typename testing::CompositeModulus<Integer>::value_type;
   for (auto const& params :
        testing::GetRnsParametersForFiniteFieldEncoding<TypeParam>()) {
-    this->SetUpRnsParameters(params);
+    this->SetUpBgvRnsParameters(params);
     if (this->HasInsufficientPrecisionForCrtInterp()) {
       continue;
     }
@@ -794,7 +738,7 @@ TYPED_TEST(RnsRlweSecretKeyPackedTest, EncryptBgvCrtDecrypts) {
 TYPED_TEST(RnsRlweSecretKeyPackedTest, PassWrongModuliToBgvCrtDecryption) {
   using Integer = typename TypeParam::Int;
   using BigInteger = typename testing::CompositeModulus<Integer>::value_type;
-  this->SetUpDefaultRnsParameters();
+  this->SetUpDefaultBgvRnsParameters();
 
   int num_moduli = this->main_moduli_.size();
   auto level = num_moduli - 1;
@@ -828,7 +772,7 @@ TYPED_TEST(RnsRlweSecretKeyPackedTest,
            CrtDecryptBgvFailsIfCiphertextPowerOfSIsNotOne) {
   using Integer = typename TypeParam::Int;
   using BigInteger = typename testing::CompositeModulus<Integer>::value_type;
-  this->SetUpDefaultRnsParameters();
+  this->SetUpDefaultBgvRnsParameters();
   int num_moduli = this->main_moduli_.size();
   auto level = num_moduli - 1;
   std::vector<BigInteger> modulus_hats =
@@ -860,7 +804,7 @@ TYPED_TEST(RnsRlweSecretKeyPackedTest,
            DecryptBgvWithCrtFailsIfCiphertextHasMismatchPolyDegree) {
   using Integer = typename TypeParam::Int;
   using BigInteger = typename testing::CompositeModulus<Integer>::value_type;
-  this->SetUpDefaultRnsParameters();
+  this->SetUpDefaultBgvRnsParameters();
   int num_moduli = this->main_moduli_.size();
   auto level = num_moduli - 1;
   std::vector<BigInteger> modulus_hats =
@@ -891,7 +835,7 @@ TYPED_TEST(RnsRlweSecretKeyPackedTest,
 TYPED_TEST(RnsRlweSecretKeyPackedTest, DecryptBgvWithCrtFailsIfEncoderIsNull) {
   using Integer = typename TypeParam::Int;
   using BigInteger = typename testing::CompositeModulus<Integer>::value_type;
-  this->SetUpDefaultRnsParameters();
+  this->SetUpDefaultBgvRnsParameters();
   int num_moduli = this->main_moduli_.size();
   auto level = num_moduli - 1;
   std::vector<BigInteger> modulus_hats =
@@ -915,6 +859,33 @@ TYPED_TEST(RnsRlweSecretKeyPackedTest, DecryptBgvWithCrtFailsIfEncoderIsNull) {
                   absl::MakeSpan(modulus_hat_invs))),
               StatusIs(absl::StatusCode::kInvalidArgument,
                        HasSubstr("`encoder` must not be null.")));
+}
+
+TYPED_TEST(RnsRlweSecretKeyPackedTest, EncryptBfvDecrypts) {
+  using Integer = typename TypeParam::Int;
+
+  for (auto const& params :
+       testing::GetBfvParametersForFiniteFieldEncoding<TypeParam>()) {
+    this->SetUpBfvRnsParameters(params);
+    int log_n = this->rns_context_->LogN();
+    Integer t = this->rns_context_->PlaintextModulus();
+    ASSERT_OK_AND_ASSIGN(RnsRlweSecretKey<TypeParam> key, this->SampleKey());
+
+    // Create a finite field encoder
+    ASSERT_OK_AND_ASSIGN(auto encoder, FiniteFieldEncoder<TypeParam>::Create(
+                                           this->rns_context_.get()));
+
+    std::vector<Integer> messages = testing::SampleMessages(1 << log_n, t);
+    ASSERT_OK_AND_ASSIGN(
+        RnsBfvCiphertext<TypeParam> ciphertext,
+        key.template EncryptBfv<FiniteFieldEncoder<TypeParam>>(
+            messages, &encoder, this->error_params_.get(), this->prng_.get()));
+
+    ASSERT_OK_AND_ASSIGN(std::vector<Integer> dec_messages,
+                         key.template DecryptBfv<FiniteFieldEncoder<TypeParam>>(
+                             ciphertext, &encoder));
+    EXPECT_EQ(dec_messages, messages);
+  }
 }
 
 }  // namespace

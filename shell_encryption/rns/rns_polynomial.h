@@ -347,9 +347,101 @@ class RnsPolynomial {
       const RnsInt<ModularInt>& ql_inv,
       absl::Span<const PrimeModulus<ModularInt>* const> moduli);
 
+  // Returns `this` (mod P), where this polynomial is modulo Q = q_0 ... q_L.
+  // This polynomial must be in coefficient form, and the returned polynomial is
+  // in coefficient form too.
+  // The parameters are:
+  // `this_moduli` specifies the prime moduli q_i,
+  // `output_moduli` specifies the prime moduli p_j of P,
+  // `prime_q_hat_inv_mod_qs` = {(Q/q_i)^(-1) mod q_i}_i,
+  // `prime_q_hat_mod_ps` = {Q / q_i mod p_j}_j,
+  // `q_mod_ps` = {Q mod p_j}_j.
+  absl::StatusOr<RnsPolynomial<ModularInt>> SwitchRnsBasis(
+      absl::Span<const PrimeModulus<ModularInt>* const> this_moduli,    // q_i's
+      absl::Span<const PrimeModulus<ModularInt>* const> output_moduli,  // p_j's
+      absl::Span<const ModularInt> prime_q_hat_inv_mod_qs,
+      absl::Span<const RnsInt<ModularInt>> prime_q_hat_mod_ps,
+      absl::Span<const ModularInt> q_mod_ps) const;
+
+  // Returns round(P / Q * `this`) mod P, where this polynomial is modulo Q =
+  // q_0 * ... * q_L, and the output RNS modulus is P = p_1 * ... * p_K.
+  // This polynomial must be in coefficient form, and the returned polynomial is
+  // in coefficient form too.
+  // The parameters are:
+  // `this_moduli` specifies the prime moduli q_i,
+  // `output_moduli` specifies the prime moduli p_j of P,
+  // `prime_q_hat_inv_mod_qs` = {(Q/q_i)^(-1) mod q_i}_i,
+  // `prime_q_inv_mod_ps` = {q_i^(-1) mod p_j}_j,
+  // `p_mod_qs` = {P mod q_i}_i.
+  absl::StatusOr<RnsPolynomial<ModularInt>> ScaleAndSwitchRnsBasis(
+      absl::Span<const PrimeModulus<ModularInt>* const> this_moduli,    // q_i's
+      absl::Span<const PrimeModulus<ModularInt>* const> output_moduli,  // p_j's
+      absl::Span<const ModularInt> prime_q_hat_inv_mod_qs,
+      absl::Span<const RnsInt<ModularInt>> prime_q_inv_mod_ps,
+      absl::Span<const ModularInt> p_mod_qs) const;
+
+  // Extends this polynomial from mod Q to mod (Q*P), where Q = q_0 ... q_l
+  // is specified in `this_moduli`, and P = p_1 ... p_k is specified in
+  // `aux_moduli`.
+  absl::Status ExtendRnsBasisInPlace(
+      absl::Span<const PrimeModulus<ModularInt>* const> this_moduli,  // q_i's
+      absl::Span<const PrimeModulus<ModularInt>* const> aux_moduli,   // p_j's
+      absl::Span<const ModularInt> prime_q_hat_inv_mod_qs,
+      absl::Span<const RnsInt<ModularInt>> prime_q_hat_mod_ps,
+      absl::Span<const ModularInt> q_mod_ps) {
+    RLWE_ASSIGN_OR_RETURN(
+        RnsPolynomial<ModularInt> a_mod_aux,
+        SwitchRnsBasis(this_moduli, aux_moduli, prime_q_hat_inv_mod_qs,
+                       prime_q_hat_mod_ps, q_mod_ps));
+    coeff_vectors_.reserve(coeff_vectors_.size() +
+                           a_mod_aux.coeff_vectors_.size());
+    for (auto& coeffs_mod_pj : a_mod_aux.coeff_vectors_) {
+      coeff_vectors_.push_back(std::move(coeffs_mod_pj));
+    }
+    return absl::OkStatus();
+  }
+
+  // Scales the polynomial (this, polynomial_aux) mod (Q, P) up by `t` and then
+  // scales down by P, storing the resulting polynomial (mod Q) in `this`.
+  // This function computes round(t / P * polynomial) mod Q, where polynomial is
+  // modulo Q * P, represented by `this` (mod Q) and `polynomial_aux` (mod P).
+  absl::Status ScaleAndReduceRnsBasisInPlace(
+      RnsPolynomial<ModularInt> polynomial_aux, typename ModularInt::Int t,
+      absl::Span<const PrimeModulus<ModularInt>* const> this_moduli,  // q_i's
+      absl::Span<const PrimeModulus<ModularInt>* const> aux_moduli,   // p_j's
+      absl::Span<const ModularInt> prime_p_hat_inv_mod_ps,
+      absl::Span<const RnsInt<ModularInt>> prime_p_hat_mod_qs,
+      absl::Span<const ModularInt> p_mod_qs,
+      absl::Span<const ModularInt> p_inv_mod_qs) {
+    // t * `this` (mod Q).
+    RLWE_RETURN_IF_ERROR(MulInPlace(t, this_moduli));
+    // t * `polynomial_aux` (mod P).
+    RLWE_RETURN_IF_ERROR(polynomial_aux.MulInPlace(t, aux_moduli));
+
+    // Next we scale down the polynomial (this, polynomial_aux) mod (Q*P) by P,
+    // and take the result mod Q, which can be computed as
+    // (polynomial - polynomial_aux) / P (mod Q).
+    if (polynomial_aux.IsNttForm()) {
+      RLWE_RETURN_IF_ERROR(polynomial_aux.ConvertToCoeffForm(aux_moduli));
+    }
+    // Compute the delta term = `polynomial_aux` (mod Q).
+    RLWE_ASSIGN_OR_RETURN(RnsPolynomial<ModularInt> delta,
+                          polynomial_aux.SwitchRnsBasis(
+                              aux_moduli, this_moduli, prime_p_hat_inv_mod_ps,
+                              prime_p_hat_mod_qs, p_mod_qs));
+    if (IsNttForm()) {
+      RLWE_RETURN_IF_ERROR(delta.ConvertToNttForm(this_moduli));
+    }
+    // (polynomial - polynomial_aux) (mod Q).
+    RLWE_RETURN_IF_ERROR(SubInPlace(delta, this_moduli));
+    // (polynomial - polynomial_aux) / P (mod Q).
+    RLWE_RETURN_IF_ERROR(MulInPlace(p_inv_mod_qs, this_moduli));
+    return absl::OkStatus();
+  }
+
   // Returns the polynomial b(X) wrt RNS modulus P = [p_0, ..., p_{K-1}] that
   // approximately represents the same polynomial over the integers as this
-  // polynomial mod Q. The returned polynomial b(X) is in NTT form.
+  // polynomial mod Q. The returned polynomial b(X) is in coefficient form.
   //
   // This is an implementation of the fast approximate basis conversion
   // algorithm from

@@ -16,22 +16,19 @@
 #ifndef RLWE_RNS_RNS_GALOIS_KEY_H_
 #define RLWE_RNS_RNS_GALOIS_KEY_H_
 
-#include <math.h>
-
 #include <algorithm>
-#include <cstdint>
+#include <string>
 #include <vector>
 
-#include "absl/status/status.h"
-#include "shell_encryption/prng/prng.h"
-#include "shell_encryption/rns/error_distribution.h"
+#include "absl/status/statusor.h"
+#include "absl/strings/string_view.h"
+#include "shell_encryption/rns/rns_bfv_ciphertext.h"
 #include "shell_encryption/rns/rns_bgv_ciphertext.h"
-#include "shell_encryption/rns/rns_error_params.h"
+#include "shell_encryption/rns/rns_ciphertext.h"
 #include "shell_encryption/rns/rns_gadget.h"
 #include "shell_encryption/rns/rns_modulus.h"
 #include "shell_encryption/rns/rns_polynomial.h"
 #include "shell_encryption/rns/rns_secret_key.h"
-#include "shell_encryption/status_macros.h"
 
 namespace rlwe {
 
@@ -65,11 +62,26 @@ class RnsGaloisKey {
   static absl::StatusOr<RnsGaloisKey> CreateForBgv(
       const RnsRlweSecretKey<ModularInt>& secret_key, int power, int variance,
       const RnsGadget<ModularInt>* gadget, Integer plaintext_modulus,
-      PrngType prng_type);
+      PrngType prng_type) {
+    return Create(secret_key, power, variance, gadget, prng_type,
+                  /*error_scalar=*/plaintext_modulus);
+  }
+
+  // Samples a Galois key suitable for working with BFV ciphertexts, derived
+  // from given secret_key for the given substitution power.
+  static absl::StatusOr<RnsGaloisKey> CreateForBfv(
+      const RnsRlweSecretKey<ModularInt>& secret_key, int power, int variance,
+      const RnsGadget<ModularInt>* gadget, PrngType prng_type) {
+    return Create(secret_key, power, variance, gadget, prng_type);
+  }
 
   // Applies the galois key to a BGV ciphertext.
   absl::StatusOr<RnsBgvCiphertext<ModularInt>> ApplyTo(
       const RnsBgvCiphertext<ModularInt>& ciphertext) const;
+
+  // Applies the galois key to a BFV ciphertext
+  absl::StatusOr<RnsBfvCiphertext<ModularInt>> ApplyTo(
+      const RnsBfvCiphertext<ModularInt>& ciphertext) const;
 
   // Accessors to the key components.
   const std::vector<RnsPolynomial<ModularInt>>& GetKeyA() const {
@@ -84,25 +96,34 @@ class RnsGaloisKey {
 
   int Dimension() const { return key_as_.size(); }
 
-  Integer PlaintextModulus() const { return plaintext_modulus_; }
-
   int SubstitutionPower() const { return power_; }
 
  private:
+  // Factory function that samples a Galois key for different RLWE schemes.
+  // In particular, `error_scalar` should be set to the plaintext modulus
+  // for Galois key in BGV, and it should be set to 1 otherwise.
+  static absl::StatusOr<RnsGaloisKey> Create(
+      const RnsRlweSecretKey<ModularInt>& secret_key, int power, int variance,
+      const RnsGadget<ModularInt>* gadget, PrngType prng_type,
+      Integer error_scalar = 1);
+
   explicit RnsGaloisKey(std::vector<RnsPolynomial<ModularInt>> key_as,
                         std::vector<RnsPolynomial<ModularInt>> key_bs,
-                        const RnsGadget<ModularInt>* gadget,
-                        Integer plaintext_modulus, int power,
+                        const RnsGadget<ModularInt>* gadget, int power,
                         std::vector<const PrimeModulus<ModularInt>*> moduli,
                         absl::string_view prng_seed, PrngType prng_type)
       : key_as_(std::move(key_as)),
         key_bs_(std::move(key_bs)),
         gadget_(gadget),
-        plaintext_modulus_(plaintext_modulus),
         power_(power),
         moduli_(std::move(moduli)),
         prng_seed_(std::string(prng_seed)),
         prng_type_(prng_type) {}
+
+  // Applies the galois key to a generic RLWE ciphertext, and returns the
+  // component polynomials of the resulting ciphertext.
+  absl::StatusOr<std::vector<RnsPolynomial<ModularInt>>> ApplyToRlweCiphertext(
+      const RnsRlweCiphertext<ModularInt>& ciphertext) const;
 
   // The two columns of the key matrix.
   std::vector<RnsPolynomial<ModularInt>> key_as_;
@@ -110,9 +131,6 @@ class RnsGaloisKey {
 
   // The gadget used to construct this Galois key; does not take ownership.
   const RnsGadget<ModularInt>* gadget_;
-
-  // The plaintext modulus.
-  Integer plaintext_modulus_;
 
   // The substitution power of the source secret key.
   int power_;

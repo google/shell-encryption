@@ -15,6 +15,9 @@
 
 #include "shell_encryption/rns/rns_polynomial.h"
 
+#include <cmath>
+#include <vector>
+
 #include "shell_encryption/dft_transformations.h"
 #include "shell_encryption/modulus_conversion.h"
 
@@ -405,6 +408,239 @@ absl::Status RnsPolynomial<ModularInt>::ModReduceMsb(
   return absl::OkStatus();
 }
 
+template <typename ModularInt>
+absl::StatusOr<RnsPolynomial<ModularInt>>
+RnsPolynomial<ModularInt>::SwitchRnsBasis(
+    absl::Span<const PrimeModulus<ModularInt>* const> this_moduli,    // q_i's
+    absl::Span<const PrimeModulus<ModularInt>* const> output_moduli,  // p_j's
+    absl::Span<const ModularInt> prime_q_hat_inv_mod_qs,
+    absl::Span<const RnsInt<ModularInt>> prime_q_hat_mod_ps,
+    absl::Span<const ModularInt> q_mod_ps) const {
+  if (IsNttForm()) {
+    return absl::InvalidArgumentError(
+        "Polynomial must be in coefficient form.");
+  }
+  const int num_this_moduli = coeff_vectors_.size();
+  if (this_moduli.size() != num_this_moduli) {
+    return absl::InvalidArgumentError(absl::StrCat(
+        "`this_moduli` must contain ", num_this_moduli, " RNS moduli."));
+  }
+  if (output_moduli.empty()) {
+    return absl::InvalidArgumentError("`output_moduli` must not be empty.");
+  }
+  if (prime_q_hat_inv_mod_qs.size() < num_this_moduli) {
+    return absl::InvalidArgumentError(
+        absl::StrCat("`prime_q_hat_inv_mod_qs` must contain at least ",
+                     num_this_moduli, " elements."));
+  }
+  if (prime_q_hat_mod_ps.size() < num_this_moduli) {
+    return absl::InvalidArgumentError(
+        absl::StrCat("`prime_q_hat_mod_ps` must contain at least ",
+                     num_this_moduli, " elements."));
+  }
+  if (q_mod_ps.size() != output_moduli.size()) {
+    return absl::InvalidArgumentError(absl::StrCat(
+        "`q_mod_ps` must contain ", output_moduli.size(), " elements."));
+  }
+
+  // The following vector holds [(a * (Q/qi)^-1) mod qi for all qi], where
+  // a(X) is this polynomial in R_Q for Q = q0 * ... * qL.
+  std::vector<std::vector<ModularInt>> scaled_coeff_mod_qs = coeff_vectors_;
+  for (int i = 0; i < this_moduli.size(); ++i) {
+    const ModularIntParams* mod_params_qi = this_moduli[i]->ModParams();
+    // (this * (Q/qi)^-1) mod qi
+    RLWE_RETURN_IF_ERROR(ModularInt::BatchMulInPlace(
+        &scaled_coeff_mod_qs[i], prime_q_hat_inv_mod_qs[i], mod_params_qi));
+  }
+
+  // First, compute the multiplier u such that a mod Q = b - u * Q, where b(X)
+  // is the CRT interpolation intermediate result of a (mod Q) without modular
+  // reduction. Specifically, we compute u using the formula
+  //  u = round( sum((a * (Q/qi)^-1 mod qi) / qi, i = 0..L) ),
+  // where division by qi is over the real numbers and computed using floating
+  // point arithmetic.
+  std::vector<double> prime_q_values;
+  for (auto modulus : this_moduli) {
+    prime_q_values.push_back(static_cast<double>(modulus->Modulus()));
+  }
+  std::vector<double> us(NumCoeffs(), 0.0);
+  for (int i = 0; i < this_moduli.size(); ++i) {
+    const ModularIntParams* mod_params_qi = this_moduli[i]->ModParams();
+    for (int k = 0; k < scaled_coeff_mod_qs[i].size(); ++k) {
+      double scaled_coeff_value = static_cast<double>(
+          scaled_coeff_mod_qs[i][k].ExportInt(mod_params_qi));
+      scaled_coeff_value /= prime_q_values[i];
+      us[k] += scaled_coeff_value;
+    }
+  }
+
+  // Next, each CRT component of a (mod P) can be computed as
+  // sum((a * (Q/qi)^-1 mod qi) * Q / qi mod pj, i = 0..L) - u * Q (mod pj).
+  std::vector<std::vector<ModularInt>> output_coeffs(output_moduli.size());
+  for (int j = 0; j < output_moduli.size(); ++j) {
+    output_coeffs[j].resize(
+        NumCoeffs(), ModularInt::ImportZero(output_moduli[j]->ModParams()));
+  }
+  for (int i = 0; i < this_moduli.size(); ++i) {
+    const ModularIntParams* mod_params_qi = this_moduli[i]->ModParams();
+    for (int j = 0; j < output_moduli.size(); ++j) {
+      // [(this * (Q/qi)^-1) mod qi] mod pj
+      const ModularIntParams* mod_params_pj = output_moduli[j]->ModParams();
+      RLWE_ASSIGN_OR_RETURN(std::vector<ModularInt> scaled_coeffs_pj,
+                            ConvertModulus(scaled_coeff_mod_qs[i],
+                                           *mod_params_qi, *mod_params_pj));
+      // [(this * (Q/qi)^-1) mod qi] * Q / qi mod pj
+      RLWE_RETURN_IF_ERROR(ModularInt::BatchMulInPlace(
+          &scaled_coeffs_pj, prime_q_hat_mod_ps[i].Component(j),
+          mod_params_pj));
+      // add to output_coeffs
+      RLWE_RETURN_IF_ERROR(ModularInt::BatchAddInPlace(
+          &output_coeffs[j], scaled_coeffs_pj, mod_params_pj));
+    }
+  }
+
+  // Add the correction term - u * Q (mod P) to the output coefficients.
+  for (int j = 0; j < output_moduli.size(); ++j) {
+    const ModularIntParams* mod_params_pj = output_moduli[j]->ModParams();
+    std::vector<ModularInt> corrections_mod_pj;
+    corrections_mod_pj.reserve(us.size());
+    for (int k = 0; k < us.size(); ++k) {
+      auto u = static_cast<typename ModularInt::Int>(std::round(us[k]));
+      RLWE_ASSIGN_OR_RETURN(
+          ModularInt correction_mod_pj,
+          ModularInt::ImportInt(static_cast<typename ModularInt::Int>(u),
+                                mod_params_pj));
+      correction_mod_pj.MulInPlace(q_mod_ps[j], mod_params_pj);
+      corrections_mod_pj.push_back(std::move(correction_mod_pj));
+    }
+    RLWE_RETURN_IF_ERROR(ModularInt::BatchSubInPlace(
+        &output_coeffs[j], corrections_mod_pj, mod_params_pj));
+  }
+
+  // Return the RNS polynomial in Coefficient form
+  return RnsPolynomial<ModularInt>(log_n_, std::move(output_coeffs),
+                                   /*is_ntt=*/false);
+}
+
+template <typename ModularInt>
+absl::StatusOr<RnsPolynomial<ModularInt>>
+RnsPolynomial<ModularInt>::ScaleAndSwitchRnsBasis(
+    absl::Span<const PrimeModulus<ModularInt>* const> this_moduli,    // q_i's
+    absl::Span<const PrimeModulus<ModularInt>* const> output_moduli,  // p_j's
+    absl::Span<const ModularInt> prime_q_hat_inv_mod_qs,
+    absl::Span<const RnsInt<ModularInt>> prime_q_inv_mod_ps,
+    absl::Span<const ModularInt> p_mod_qs) const {
+  if (IsNttForm()) {
+    return absl::InvalidArgumentError(
+        "Polynomial must be in coefficient form.");
+  }
+  const int num_this_moduli = coeff_vectors_.size();
+  if (this_moduli.size() != num_this_moduli) {
+    return absl::InvalidArgumentError(absl::StrCat(
+        "`this_moduli` must contain ", num_this_moduli, " RNS moduli."));
+  }
+  if (output_moduli.empty()) {
+    return absl::InvalidArgumentError("`output_moduli` must not be empty.");
+  }
+  if (prime_q_hat_inv_mod_qs.size() < num_this_moduli) {
+    return absl::InvalidArgumentError(
+        absl::StrCat("`prime_q_hat_inv_mod_qs` must contain at least ",
+                     num_this_moduli, " elements."));
+  }
+  if (prime_q_inv_mod_ps.size() != output_moduli.size()) {
+    return absl::InvalidArgumentError(
+        absl::StrCat("`prime_q_inv_mod_ps` must contain ", output_moduli.size(),
+                     " elements."));
+  }
+  if (p_mod_qs.size() < num_this_moduli) {
+    return absl::InvalidArgumentError(absl::StrCat(
+        "`p_mod_qs` must contain at least ", num_this_moduli, " elements."));
+  }
+
+  // The following vector holds [(P * a * (Q/qi)^-1) mod qi for all qi], where
+  // a(X) is this polynomial in R_Q for Q = q0 * ... * qL.
+  std::vector<std::vector<ModularInt>> scaled_coeff_mod_qs = coeff_vectors_;
+  for (int i = 0; i < this_moduli.size(); ++i) {
+    const ModularIntParams* mod_params_qi = this_moduli[i]->ModParams();
+    // (P * this) mod qi
+    RLWE_RETURN_IF_ERROR(ModularInt::BatchMulInPlace(
+        &scaled_coeff_mod_qs[i], p_mod_qs[i], mod_params_qi));
+    // (P * this * (Q/qi)^-1) mod qi
+    RLWE_RETURN_IF_ERROR(ModularInt::BatchMulInPlace(
+        &scaled_coeff_mod_qs[i], prime_q_hat_inv_mod_qs[i], mod_params_qi));
+  }
+
+  // First, compute the multiplier u such that P * a mod Q = b - u * Q, where a
+  // is this polynomial in R_Q, and b is the CRT interpolation intermediate
+  // result of P * a without modular reduction. That is, this is the residue
+  // relation of P * a mod Q.
+  // We compute u using the formula
+  //  u = round( sum((P * a * (Q/qi)^-1 mod qi) / qi, i = 0..L) ),
+  // where division by qi is over the real numbers and computed using floating
+  // point arithmetic.
+  std::vector<double> prime_q_values;
+  for (auto modulus : this_moduli) {
+    prime_q_values.push_back(static_cast<double>(modulus->Modulus()));
+  }
+  std::vector<double> us(NumCoeffs(), 0.0);
+  for (int i = 0; i < this_moduli.size(); ++i) {
+    const ModularIntParams* mod_params_qi = this_moduli[i]->ModParams();
+    for (int k = 0; k < scaled_coeff_mod_qs[i].size(); ++k) {
+      double scaled_coeff_value = static_cast<double>(
+          scaled_coeff_mod_qs[i][k].ExportInt(mod_params_qi));
+      scaled_coeff_value /= prime_q_values[i];
+      us[k] += scaled_coeff_value;
+    }
+  }
+
+  // Next, each CRT component of round((P / Q) * a) mod P can be computed as
+  // -sum((P * a * (Q/qi)^-1 mod qi) * qi^-1 mod pj, i = 0..L) + u (mod pj).
+  std::vector<std::vector<ModularInt>> output_coeffs(output_moduli.size());
+  for (int j = 0; j < output_moduli.size(); ++j) {
+    output_coeffs[j].resize(
+        NumCoeffs(), ModularInt::ImportZero(output_moduli[j]->ModParams()));
+  }
+  for (int i = 0; i < this_moduli.size(); ++i) {
+    const ModularIntParams* mod_params_qi = this_moduli[i]->ModParams();
+    for (int j = 0; j < output_moduli.size(); ++j) {
+      // [(P * this * (Q/qi)^-1) mod qi] mod pj
+      const ModularIntParams* mod_params_pj = output_moduli[j]->ModParams();
+      RLWE_ASSIGN_OR_RETURN(std::vector<ModularInt> scaled_coeffs_pj,
+                            ConvertModulus(scaled_coeff_mod_qs[i],
+                                           *mod_params_qi, *mod_params_pj));
+      // - [(P * this * (Q/qi)^-1) mod qi] * qi^(-1) mod pj
+      RLWE_RETURN_IF_ERROR(ModularInt::BatchMulInPlace(
+          &scaled_coeffs_pj,
+          prime_q_inv_mod_ps[j].Component(i).Negate(mod_params_pj),
+          mod_params_pj));
+      // add to output_coeffs
+      RLWE_RETURN_IF_ERROR(ModularInt::BatchAddInPlace(
+          &output_coeffs[j], scaled_coeffs_pj, mod_params_pj));
+    }
+  }
+
+  // Add the correction term u to the output coefficients
+  for (int j = 0; j < output_moduli.size(); ++j) {
+    const ModularIntParams* mod_params_pj = output_moduli[j]->ModParams();
+    std::vector<ModularInt> us_mod_pj;
+    us_mod_pj.reserve(us.size());
+    for (int k = 0; k < us.size(); ++k) {
+      auto u = static_cast<typename ModularInt::Int>(std::round(us[k]));
+      RLWE_ASSIGN_OR_RETURN(
+          ModularInt u_mod_pj,
+          ModularInt::ImportInt(static_cast<typename ModularInt::Int>(u),
+                                mod_params_pj));
+      us_mod_pj.push_back(std::move(u_mod_pj));
+    }
+    RLWE_RETURN_IF_ERROR(ModularInt::BatchAddInPlace(&output_coeffs[j],
+                                                     us_mod_pj, mod_params_pj));
+  }
+
+  // Return the RNS polynomial in Coefficient form
+  return RnsPolynomial<ModularInt>(log_n_, std::move(output_coeffs),
+                                   /*is_ntt=*/false);
+}
+
 // Switch to another CRT basis P = [p0, ..., p{k-1}] in NTT form
 // Given (a_0,..,a_L) mod (q_0,..,q_L) which represents a \in [0,Q) for Q
 // the product of q_0,..,q_L, by Chinese Reminder Theorem we have that
@@ -462,7 +698,6 @@ RnsPolynomial<ModularInt>::ApproxSwitchRnsBasis(
 
     for (int j = 0; j < output_moduli.size(); ++j) {
       const ModularIntParams* mod_params_pj = output_moduli[j]->ModParams();
-      const NttParams* ntt_params_pj = output_moduli[j]->NttParams();
       // Compute a_pj = ([a_i * (Q/q_i)^(-1) mod q_i] * Q/q_i) (mod p_j).
       RLWE_ASSIGN_OR_RETURN(
           std::vector<ModularInt> a_coeffs_pj,
@@ -470,8 +705,6 @@ RnsPolynomial<ModularInt>::ApproxSwitchRnsBasis(
               ? ConvertModulusBalanced(a_coeffs_qi, *mod_params_qi,
                                        *mod_params_pj)
               : ConvertModulus(a_coeffs_qi, *mod_params_qi, *mod_params_pj));
-      RLWE_RETURN_IF_ERROR(ForwardNumberTheoreticTransform(
-          a_coeffs_pj, *ntt_params_pj, *mod_params_pj));
       RLWE_RETURN_IF_ERROR(ModularInt::BatchMulInPlace(
           &a_coeffs_pj, prime_q_hat_mod_ps[i].Component(j), mod_params_pj));
       RLWE_RETURN_IF_ERROR(ModularInt::BatchAddInPlace(
@@ -480,7 +713,7 @@ RnsPolynomial<ModularInt>::ApproxSwitchRnsBasis(
   }
   // Return the RNS polynomial in NTT form
   return RnsPolynomial<ModularInt>(log_n_, std::move(output_coeffs),
-                                   /*is_ntt=*/true);
+                                   /*is_ntt=*/false);
 }
 
 template <typename ModularInt>
@@ -540,6 +773,7 @@ absl::Status RnsPolynomial<ModularInt>::ApproxModReduceLsb(
       polynomial_aux.ApproxSwitchRnsBasis(
           aux_moduli, this_moduli, prime_p_hat_inv_mod_ps, prime_p_hat_mod_qs,
           /*is_balanced_rep=*/true));
+  RLWE_RETURN_IF_ERROR(delta.ConvertToNttForm(this_moduli));
 
   // delta = t * [k * polynomial_aux (mod P)] (mod Q).
   RLWE_RETURN_IF_ERROR(delta.MulInPlace(t, this_moduli));
@@ -594,7 +828,8 @@ absl::Status RnsPolynomial<ModularInt>::ApproxModReduceMsb(
       RnsPolynomial<ModularInt> delta,
       polynomial_aux.ApproxSwitchRnsBasis(
           aux_moduli, this_moduli, prime_p_hat_inv_mod_ps, prime_p_hat_mod_qs,
-          /*is_balanced_rep=*/true));
+          /*is_balanced_rep=*/false));
+  RLWE_RETURN_IF_ERROR(delta.ConvertToNttForm(this_moduli));
 
   // Make sure this RNS polynomial is in NTT form.
   if (!IsNttForm()) {
