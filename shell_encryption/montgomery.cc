@@ -14,6 +14,7 @@
 
 #include "shell_encryption/montgomery.h"
 
+#include "absl/status/statusor.h"
 #include "shell_encryption/transcription.h"
 
 namespace rlwe {
@@ -468,6 +469,43 @@ template <typename T>
 MontgomeryInt<T> MontgomeryInt<T>::MultiplicativeInverse(
     const Params* params) const {
   return (*this).ModExp(static_cast<Int>(params->modulus - 2), params);
+}
+
+// We use the Extended Euclidean Algorithm to find s and t such that
+//   x * s + m * t = gcd(x, m).
+// In particular, if gcd(x, m) == 1 then x^(-1) (mod m) = s.
+template <typename T>
+absl::StatusOr<MontgomeryInt<T>> MontgomeryInt<T>::MultiplicativeInverseFast(
+    const Params* params) const {
+  // We keep the last two elements in the sequences {r_i} and {s_i}, where
+  //   q_i = floor(r_{i-1} / r_i),
+  //   r_{i+1} = r_{i-1} - q_i * r_i,
+  //   s_{i+1} = s_{i-1} - q_i * s_i.
+  // Since we work with unsigned integers, we store abs(s_i) which is -s_i iff
+  // i is odd. We always have 0 <= x < m, so we start from the second iteration
+  // of the extended euclidean algorithm with r_0 = x, r_1 = m - x, s_0 = 1, and
+  // s_1 = -1 (i.e. storing abs(s_1) = 1).
+  Int x = ExportInt(params);
+  Int r[2] = {x, static_cast<Int>(params->modulus - x)};
+  Int s[2] = {1, 1};
+
+  // We use the "^1" trick and set j \in {0, 1} to be the least significant bit
+  // of the previous element's index. Thus j^1 points to the current element,
+  // and when updating, j points to the next element in the sequence.
+  int j = 0;
+  for (; r[j ^ 1] != 0; j ^= 1) {
+    Int q = r[j] / r[j ^ 1];
+    r[j] = r[j] % r[j ^ 1];
+    s[j] = s[j] + q * s[j ^ 1];  // no integer overflow should happen
+  }
+
+  // If gcd != 1, then there is no inverse of x (mod m).
+  if (r[j] != 1) {
+    return absl::InvalidArgumentError("Multiplicative inverse does not exist.");
+  }
+  // Note that s[j] = abs(s_i) which is -s_i iff i is odd (equivalently j == 0).
+  // So we recover x^(-1) (mod m) from either s[j] or m - s[j].
+  return ImportInt(j == 0 ? s[j] : params->modulus - s[j], params);
 }
 
 // Instantiations of MontgomeryInt and MontgomeryIntParams with specific

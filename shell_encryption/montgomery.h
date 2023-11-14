@@ -313,8 +313,14 @@ class ABSL_MUST_USE_RESULT MontgomeryInt {
     // This function computes the product of the two numbers (a and b), which
     // will equal a * R * b * R in Montgomery representation. It then performs
     // the reduction, creating a * b * R (mod N).
-    Int u = static_cast<Int>(n_ * that.n_) * params->inv_modulus;
-    BigInt t = static_cast<BigInt>(n_) * that.n_ + params->modulus_bigint * u;
+    BigInt product = static_cast<BigInt>(n_) * that.n_;  // a * R * b * R
+
+    // Compute u = (product mod R) * N^(-1) (mod R). Since R = 2^bitsize(Int),
+    // modulo reduction by R can be done by casting from BigInt to Int.
+    Int u = static_cast<Int>(product * params->inv_modulus);
+
+    // Compute t_msb = a * b * R (mod N).
+    BigInt t = product + params->modulus_bigint * u;
     Int t_msb = static_cast<Int>(t >> Params::bitsize_int);
 
     // The steps above produce an integer that is in the range [0, 2N).
@@ -600,9 +606,20 @@ class ABSL_MUST_USE_RESULT MontgomeryInt {
   MontgomeryInt ModExp(Int exponent,
                                                const Params* params) const;
 
-  // Inverse.
+  // Inverse using modular exponentiation.
+  //
+  // Note: The implementation assumes the modulus is a prime number.
   MontgomeryInt
   MultiplicativeInverse(const Params* params) const;
+
+  // Inverse using extended Euclidean algorithm.
+  // Returns this^(-1) (mod modulus) if the inverse exists, or returns an error
+  // if gcd(this, modulus) != 1.
+  //
+  // WARNING: This function is not constant time, so it should not be used on
+  //          ciphertext or key materials.
+  absl::StatusOr<MontgomeryInt> MultiplicativeInverseFast(
+      const Params* params) const;
 
  private:
   template <typename Prng = rlwe::SecurePrng>
