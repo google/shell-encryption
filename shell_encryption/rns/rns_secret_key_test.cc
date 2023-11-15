@@ -247,6 +247,37 @@ TYPED_TEST(RnsRlweSecretKeyTest, KeyCoefficientsAreBoundedAndConsistent) {
   }
 }
 
+TYPED_TEST(RnsRlweSecretKeyTest, EncryptPolynomialBgvFailsIfEncoderIsNull) {
+  this->SetUpBgvContext();
+  ASSERT_OK_AND_ASSIGN(RnsRlweSecretKey<TypeParam> key, this->SampleKey());
+
+  ASSERT_OK_AND_ASSIGN(auto zero, RnsPolynomial<TypeParam>::CreateZero(
+                                      this->rns_context_->LogN(),
+                                      this->main_moduli_, /*is_ntt=*/true));
+  EXPECT_THAT(key.template EncryptPolynomialBgv<CoefficientEncoder<TypeParam>>(
+                  /*plaintext=*/zero, /*encoder=*/nullptr,
+                  this->error_params_.get(), this->prng_.get()),
+              StatusIs(absl::StatusCode::kInvalidArgument,
+                       HasSubstr("`encoder` must not be null")));
+}
+
+TYPED_TEST(RnsRlweSecretKeyTest,
+           EncryptPolynomialBgvFailsIfPlaintextCoeffForm) {
+  this->SetUpBgvContext();
+  ASSERT_OK_AND_ASSIGN(RnsRlweSecretKey<TypeParam> key, this->SampleKey());
+
+  ASSERT_OK_AND_ASSIGN(auto zero, RnsPolynomial<TypeParam>::CreateZero(
+                                      this->rns_context_->LogN(),
+                                      this->main_moduli_, /*is_ntt=*/false));
+  ASSERT_EQ(zero.IsNttForm(), false);
+
+  EXPECT_THAT(key.template EncryptPolynomialBgv<CoefficientEncoder<TypeParam>>(
+                  /*plaintext=*/zero, /*encoder=*/this->coeff_encoder_.get(),
+                  this->error_params_.get(), this->prng_.get()),
+              StatusIs(absl::StatusCode::kInvalidArgument,
+                       HasSubstr("`plaintext` must be in NTT form")));
+}
+
 TYPED_TEST(RnsRlweSecretKeyTest, EncryptBgvFailsIfEncoderIsNull) {
   this->SetUpBgvContext();
   ASSERT_OK_AND_ASSIGN(RnsRlweSecretKey<TypeParam> key, this->SampleKey());

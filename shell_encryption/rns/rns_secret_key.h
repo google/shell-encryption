@@ -65,6 +65,12 @@ class RnsRlweSecretKey {
       const Encoder* encoder, const RnsErrorParams<ModularInt>* error_params,
       SecurePrng* prng) const;
 
+  // Returns a ciphertext which is an encryption of an RnsPolynomial.
+  template <typename Encoder = CoefficientEncoder<ModularInt>>
+  absl::StatusOr<RnsBgvCiphertext<ModularInt>> EncryptPolynomialBgv(
+      RnsPolynomial<ModularInt> const& plaintext, const Encoder* encoder,
+      const RnsErrorParams<ModularInt>* error_params, SecurePrng* prng) const;
+
   // Decrypts a BGV ciphertext using this secret key. The returned result is the
   // underlying messages decoded using `encoder`.
   template <typename Encoder = CoefficientEncoder<ModularInt>>
@@ -155,18 +161,36 @@ RnsRlweSecretKey<ModularInt>::EncryptBgv(
   if (encoder == nullptr) {
     return absl::InvalidArgumentError("`encoder` must not be null.");
   }
+
+  // Encode messages into a plaintext polynomial.
+  RLWE_ASSIGN_OR_RETURN(RnsPolynomial<ModularInt> plaintext,
+                        encoder->EncodeBgv(messages, moduli_));
+
+  // EncryptPolynomialBgv expects plaintext to be in NTT form.
+  if (!plaintext.IsNttForm()) {
+    RLWE_RETURN_IF_ERROR(plaintext.ConvertToNttForm(moduli_));
+  }
+
+  return EncryptPolynomialBgv(plaintext, encoder, error_params, prng);
+}
+
+template <typename ModularInt>
+template <typename Encoder>
+absl::StatusOr<RnsBgvCiphertext<ModularInt>>
+RnsRlweSecretKey<ModularInt>::EncryptPolynomialBgv(
+    RnsPolynomial<ModularInt> const& plaintext, const Encoder* encoder,
+    const RnsErrorParams<ModularInt>* error_params, SecurePrng* prng) const {
+  if (encoder == nullptr) {
+    return absl::InvalidArgumentError("`encoder` must not be null.");
+  }
   if (error_params == nullptr) {
     return absl::InvalidArgumentError("`error_params` must not be null.");
   }
   if (prng == nullptr) {
     return absl::InvalidArgumentError("`prng` must not be null.");
   }
-
-  // Encode messages into a plaintext polynomial.
-  RLWE_ASSIGN_OR_RETURN(RnsPolynomial<ModularInt> plaintext,
-                        encoder->EncodeBgv(messages, moduli_));
   if (!plaintext.IsNttForm()) {
-    RLWE_RETURN_IF_ERROR(plaintext.ConvertToNttForm(moduli_));
+    return absl::InvalidArgumentError("`plaintext` must be in NTT form.");
   }
 
   // Sample a from the uniform distribution.
