@@ -50,14 +50,15 @@ class FiniteFieldEncoder {
   static absl::StatusOr<FiniteFieldEncoder<ModularInt>> Create(
       const RnsContext<ModularInt>* context);
 
-  // Returns a polynomial (in coefficient form) whose slots encode `messages`
-  // as in the BGV scheme.
+  // Returns a polynomial (in coefficient form) whose slots encode
+  // `messages` as in the BGV scheme. `messages` are expected to be in the
+  // range [0, t).
   absl::StatusOr<RnsPolynomial<ModularInt>> EncodeBgv(
       absl::Span<const Integer> messages,
       absl::Span<const PrimeModulus<ModularInt>* const> moduli) const;
 
   // Returns the messages that are encoded in the slots of `plaintext` as in the
-  // BGV scheme.
+  // BGV scheme. Messages are returned in the range [0, t).
   absl::StatusOr<std::vector<Integer>> DecodeBgv(
       RnsPolynomial<ModularInt> plaintext,
       absl::Span<const PrimeModulus<ModularInt>* const> moduli) const;
@@ -86,6 +87,20 @@ class FiniteFieldEncoder {
   absl::StatusOr<std::vector<Integer>> DecodeBfv(
       RnsPolynomial<ModularInt> plaintext,
       absl::Span<const PrimeModulus<ModularInt>* const> moduli) const;
+
+  // Return a set of unsigned messages where all elements are in the range
+  // [0, t) from a set of signed `messages` in range [-t/2, t/2).
+  // All elements of `messages` are expected to be between [-t/2, t/2).
+  template <typename SignedInteger>
+  absl::StatusOr<std::vector<Integer>> WrapSigned(
+      absl::Span<const SignedInteger> messages) const;
+
+  // Return a set of signed messages where all elements are in the range
+  // [-t/2, t/2) from a set of unsigned `messages` in range [0, t).
+  // All elements of `messages` are expected to be between [0, t).
+  template <typename SignedInteger>
+  absl::StatusOr<std::vector<SignedInteger>> UnwrapToSigned(
+      absl::Span<const Integer> messages) const;
 
   // Accessors
   int LogN() const { return coeff_encoder_->LogN(); }
@@ -189,6 +204,41 @@ FiniteFieldEncoder<ModularInt>::DecodeBgvWithCrt(
     values[i] = slots[slot_indices_[i]].ExportInt(mod_params_t);
   }
   return values;
+}
+
+template <typename ModularInt>
+template <typename SignedInteger>
+absl::StatusOr<std::vector<typename ModularInt::Int>>
+FiniteFieldEncoder<ModularInt>::WrapSigned(
+    absl::Span<const SignedInteger> messages) const {
+  const Integer t = context_->PlaintextModulus();
+
+  std::vector<Integer> unsigned_messages(messages.size());
+  for (int i = 0; i < messages.size(); ++i) {
+    auto unsigned_message = messages[i];
+    // this conversion assumes t is odd, enforced by RnsContext.
+    unsigned_messages[i] = static_cast<Integer>(
+        (unsigned_message < 0) ? unsigned_message + t : unsigned_message);
+  }
+  return unsigned_messages;
+}
+
+template <typename ModularInt>
+template <typename SignedInteger>
+absl::StatusOr<std::vector<SignedInteger>>
+FiniteFieldEncoder<ModularInt>::UnwrapToSigned(
+    absl::Span<const Integer> messages) const {
+  const Integer t = context_->PlaintextModulus();
+  const Integer t_half = t / 2;  // really is floor(t/2) because t is odd.
+
+  std::vector<SignedInteger> signed_messages(messages.size());
+  for (int i = 0; i < messages.size(); ++i) {
+    auto signed_message = static_cast<SignedInteger>(messages[i]);
+    // this conversion assumes t is odd, enforced by RnsContext.
+    signed_messages[i] =
+        (signed_message > t_half) ? signed_message - t : signed_message;
+  }
+  return signed_messages;
 }
 
 }  // namespace rlwe
