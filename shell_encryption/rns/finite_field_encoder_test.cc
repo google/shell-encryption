@@ -17,6 +17,8 @@
 
 #include <cmath>
 #include <memory>
+#include <type_traits>
+#include <utility>
 #include <vector>
 
 #include <gmock/gmock.h>
@@ -164,6 +166,97 @@ TYPED_TEST(FiniteFieldEncoderTest, BgvEncodedResultDecodes) {
     ASSERT_OK_AND_ASSIGN(auto decoded,
                          encoder.DecodeBgv(poly, this->main_moduli_));
     EXPECT_EQ(decoded, messages);
+  }
+}
+
+TYPED_TEST(FiniteFieldEncoderTest, WrappedSigned) {
+  using Integer = typename TypeParam::Int;
+  // Only built-in types work with std::make_signed. Custom types like
+  // absl::uint128 do not so check before calling.
+  if constexpr (std::is_unsigned_v<Integer>) {
+    using SignedInteger = std::make_signed_t<Integer>;
+    for (auto const& params :
+         testing::GetRnsParametersForFiniteFieldEncoding<TypeParam>()) {
+      this->SetUpRnsParameters(params);
+      ASSERT_OK_AND_ASSIGN(auto encoder, FiniteFieldEncoder<TypeParam>::Create(
+                                             this->rns_context_.get()));
+
+      Integer t = this->rns_context_->PlaintextModulus();
+      SignedInteger signed_t = static_cast<SignedInteger>(t);
+
+      // First, test the boundary conditions for WrapSigned.
+      std::vector<SignedInteger> test_values{0, -1, 1, -signed_t / 2,
+                                             signed_t / 2};
+      ASSERT_OK_AND_ASSIGN(
+          auto wrapped_values,
+          encoder.template WrapSigned<SignedInteger>(test_values));
+      std::vector<Integer> signed_test_values = {0, t - 1, 1, t / 2 + 1, t / 2};
+      ASSERT_EQ(wrapped_values, signed_test_values);
+
+      // Next, check UnwrapToSigned.
+      ASSERT_OK_AND_ASSIGN(
+          std::vector<SignedInteger> unwrapped_values,
+          encoder.template UnwrapToSigned<SignedInteger>(wrapped_values));
+      EXPECT_EQ(unwrapped_values, test_values);
+    }
+  }
+}
+
+TYPED_TEST(FiniteFieldEncoderTest, BgvSignedEncodedSumDecodes) {
+  using Integer = typename TypeParam::Int;
+
+  // Only built-in types work with std::make_signed. Custom types like
+  // absl::uint128 do not so check before calling.
+  if constexpr (std::is_unsigned_v<Integer>) {
+    using SignedInteger = std::make_signed_t<Integer>;
+
+    for (auto const& params :
+         testing::GetRnsParametersForFiniteFieldEncoding<TypeParam>()) {
+      this->SetUpRnsParameters(params);
+      ASSERT_OK_AND_ASSIGN(auto encoder, FiniteFieldEncoder<TypeParam>::Create(
+                                             this->rns_context_.get()));
+
+      int num_coeffs = 1 << this->rns_context_->LogN();
+      Integer t = this->rns_context_->PlaintextModulus();
+
+      // Sample messages balanced between [-t/4, t/4] and encode into an RNS
+      // polynomial.
+      auto sampleBalancedPolynomial = [&]()
+          -> std::pair<std::vector<SignedInteger>, RnsPolynomial<TypeParam>> {
+        std::vector<Integer> positive_messages =
+            testing::SampleMessages<Integer>(num_coeffs, t / 2);
+        std::vector<SignedInteger> balanced_messages(num_coeffs);
+        for (int i = 0; i < num_coeffs; ++i) {
+          balanced_messages[i] =
+              static_cast<SignedInteger>(positive_messages[i]) - (t / 4);
+        }
+        auto wrapped_messsages_s =
+            encoder.template WrapSigned<SignedInteger>(balanced_messages);
+        CHECK(wrapped_messsages_s.ok());
+        std::vector<Integer> wrapped_messages = wrapped_messsages_s.value();
+
+        auto poly_s = encoder.EncodeBgv(wrapped_messages, this->main_moduli_);
+        CHECK(poly_s.ok());
+        RnsPolynomial<TypeParam> poly = poly_s.value();
+        return std::pair(balanced_messages, poly);
+      };
+      auto [a, poly_a] = sampleBalancedPolynomial();
+      auto [b, poly_b] = sampleBalancedPolynomial();
+
+      // Next, add the polynomials together to ensure negative numbers were
+      // encoded correctly.
+      ASSERT_OK_AND_ASSIGN(auto poly_c, poly_a.Add(poly_b, this->main_moduli_));
+      ASSERT_OK_AND_ASSIGN(auto decoded_sum,
+                           encoder.DecodeBgv(poly_c, this->main_moduli_));
+      ASSERT_OK_AND_ASSIGN(
+          auto unwrapped_sum,
+          encoder.template UnwrapToSigned<SignedInteger>(decoded_sum));
+      std::vector<SignedInteger> c(num_coeffs);
+      for (int i = 0; i < num_coeffs; ++i) {
+        c[i] = a[i] + b[i];
+      }
+      EXPECT_EQ(unwrapped_sum, c);
+    }
   }
 }
 
