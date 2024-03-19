@@ -26,6 +26,7 @@
 #include "shell_encryption/polynomial.h"
 #include "shell_encryption/rns/rns_integer.h"
 #include "shell_encryption/rns/rns_modulus.h"
+#include "shell_encryption/rns/serialization.pb.h"
 #include "shell_encryption/status_macros.h"
 
 namespace rlwe {
@@ -88,6 +89,49 @@ class RnsPolynomial {
       const std::vector<ModularInt>& coeffs_q,  // in NTT form, (mod q)
       const ModularIntParams* mod_params_q,
       absl::Span<const PrimeModulus<ModularInt>* const> moduli);
+
+  static absl::StatusOr<RnsPolynomial> Deserialize(
+      const SerializedRnsPolynomial& serialized,
+      absl::Span<const PrimeModulus<ModularInt>* const> moduli) {
+    int log_n = serialized.log_n();
+    if (log_n <= 0) {
+      return absl::InvalidArgumentError("`log_n` must be positive.");
+    }
+    int num_coeff_vectors = serialized.coeff_vectors_size();
+    if (num_coeff_vectors != moduli.size()) {
+      return absl::InvalidArgumentError(absl::StrCat(
+          "Number of serialized coefficient vectors must be ", moduli.size()));
+    }
+    int num_coeffs = 1 << log_n;
+    std::vector<std::vector<ModularInt>> coeff_vectors;
+    coeff_vectors.reserve(num_coeff_vectors);
+    for (int i = 0; i < num_coeff_vectors; ++i) {
+      RLWE_ASSIGN_OR_RETURN(
+          std::vector<ModularInt> coeffs_qi,
+          ModularInt::DeserializeVector(num_coeffs, serialized.coeff_vectors(i),
+                                        moduli[i]->ModParams()));
+      coeff_vectors.push_back(std::move(coeffs_qi));
+    }
+    return Create(std::move(coeff_vectors), serialized.is_ntt());
+  }
+
+  absl::StatusOr<SerializedRnsPolynomial> Serialize(
+      absl::Span<const PrimeModulus<ModularInt>* const> moduli) const {
+    if (moduli.size() != coeff_vectors_.size()) {
+      return absl::InvalidArgumentError(absl::StrCat(
+          "`moduli` must contain ", coeff_vectors_.size(), " RNS moduli."));
+    }
+
+    SerializedRnsPolynomial output;
+    output.set_log_n(log_n_);
+    output.set_is_ntt(is_ntt_);
+    for (int i = 0; i < coeff_vectors_.size(); ++i) {
+      RLWE_ASSIGN_OR_RETURN(*(output.add_coeff_vectors()),
+                            ModularInt::SerializeVector(
+                                coeff_vectors_[i], moduli[i]->ModParams()));
+    }
+    return output;
+  }
 
   // Converts this RNS polynomial from Coefficient form to NTT form.
   absl::Status ConvertToNttForm(

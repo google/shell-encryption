@@ -102,6 +102,17 @@ class RnsRlweSecretKey {
       const Encoder* encoder, const RnsErrorParams<ModularInt>* error_params,
       SecurePrng* prng) const;
 
+  // Returns a ciphertext that encrypts `messages` under this secret key as in
+  // the BFV scheme, where the random "a" component of the ciphertext is sampled
+  // using `prng_pad`, and the errors are sampled using `prng`.
+  // This is a variant of `EncryptBfv` using the dedicated randomness for the
+  // "a" component.
+  template <typename Encoder = CoefficientEncoder<ModularInt>>
+  absl::StatusOr<RnsBfvCiphertext<ModularInt>> EncryptBfv(
+      absl::Span<const typename ModularInt::Int> messages,
+      const Encoder* encoder, const RnsErrorParams<ModularInt>* error_params,
+      SecurePrng* prng, SecurePrng* prng_pad) const;
+
   // Decrypts a BFV ciphertext using this secret key. The returned result is the
   // underlying messages decoded using `encoder`.
   template <typename Encoder = CoefficientEncoder<ModularInt>>
@@ -295,7 +306,8 @@ template <typename Encoder>
 absl::StatusOr<RnsBfvCiphertext<ModularInt>>
 RnsRlweSecretKey<ModularInt>::EncryptBfv(
     absl::Span<const typename ModularInt::Int> messages, const Encoder* encoder,
-    const RnsErrorParams<ModularInt>* error_params, SecurePrng* prng) const {
+    const RnsErrorParams<ModularInt>* error_params, SecurePrng* prng,
+    SecurePrng* prng_pad) const {
   if (encoder == nullptr) {
     return absl::InvalidArgumentError("`encoder` must not be null.");
   }
@@ -304,6 +316,9 @@ RnsRlweSecretKey<ModularInt>::EncryptBfv(
   }
   if (prng == nullptr) {
     return absl::InvalidArgumentError("`prng` must not be null.");
+  }
+  if (prng_pad == nullptr) {
+    return absl::InvalidArgumentError("`prng_pad` must not be null.");
   }
 
   // Encode messages into a plaintext polynomial.
@@ -314,8 +329,8 @@ RnsRlweSecretKey<ModularInt>::EncryptBfv(
   }
 
   // Sample a from the uniform distribution.
-  RLWE_ASSIGN_OR_RETURN(
-      auto a, RnsPolynomial<ModularInt>::SampleUniform(LogN(), prng, moduli_));
+  RLWE_ASSIGN_OR_RETURN(auto a, RnsPolynomial<ModularInt>::SampleUniform(
+                                    LogN(), prng_pad, moduli_));
 
   // Sample the error term e (mod Q) from the error distribution.
   RLWE_ASSIGN_OR_RETURN(
@@ -335,6 +350,15 @@ RnsRlweSecretKey<ModularInt>::EncryptBfv(
                                       /*power=*/1,
                                       error_params->B_secretkey_encryption(),
                                       error_params, encoder->Context());
+}
+
+template <typename ModularInt>
+template <typename Encoder>
+absl::StatusOr<RnsBfvCiphertext<ModularInt>>
+RnsRlweSecretKey<ModularInt>::EncryptBfv(
+    absl::Span<const typename ModularInt::Int> messages, const Encoder* encoder,
+    const RnsErrorParams<ModularInt>* error_params, SecurePrng* prng) const {
+  return EncryptBfv<Encoder>(messages, encoder, error_params, prng, prng);
 }
 
 template <typename ModularInt>

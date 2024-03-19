@@ -22,6 +22,7 @@
 
 #include "absl/status/statusor.h"
 #include "absl/strings/string_view.h"
+#include "absl/types/span.h"
 #include "shell_encryption/rns/rns_bfv_ciphertext.h"
 #include "shell_encryption/rns/rns_bgv_ciphertext.h"
 #include "shell_encryption/rns/rns_ciphertext.h"
@@ -29,6 +30,8 @@
 #include "shell_encryption/rns/rns_modulus.h"
 #include "shell_encryption/rns/rns_polynomial.h"
 #include "shell_encryption/rns/rns_secret_key.h"
+#include "shell_encryption/rns/serialization.pb.h"
+#include "shell_encryption/status_macros.h"
 
 namespace rlwe {
 
@@ -75,13 +78,128 @@ class RnsGaloisKey {
     return Create(secret_key, power, variance, gadget, prng_type);
   }
 
+  // Samples the random polynomial pads "gk_as" used in a galois key.
+  static absl::StatusOr<std::vector<RnsPolynomial<ModularInt>>> SampleRandomPad(
+      int dimension, int log_n,
+      absl::Span<const PrimeModulus<ModularInt>* const> moduli,
+      absl::string_view prng_seed, PrngType prng_type);
+
+  // Samples a Galois key for working with BGV ciphertexts, derived from
+  // `secret_key` for the given substitution power, using the random polynomials
+  // `pads` as the "a" part of the Galois key.
+  static absl::StatusOr<RnsGaloisKey> CreateWithRandomPadForBgv(
+      std::vector<RnsPolynomial<ModularInt>> key_pads,
+      const RnsRlweSecretKey<ModularInt>& secret_key, int power, int variance,
+      const RnsGadget<ModularInt>* gadget, Integer plaintext_modulus,
+      absl::string_view prng_pad_seed, PrngType prng_type) {
+    return CreateWithRandomPad(std::move(key_pads), secret_key, power, variance,
+                               gadget, prng_pad_seed, prng_type,
+                               /*error_scalar=*/plaintext_modulus);
+  }
+
+  // Samples a Galois key for working with BFV ciphertexts, derived from
+  // `secret_key` for the given substitution power, using the random polynomials
+  // `pads` as the "a" part of the Galois key.
+  static absl::StatusOr<RnsGaloisKey> CreateWithRandomPadForBfv(
+      std::vector<RnsPolynomial<ModularInt>> key_pads,
+      const RnsRlweSecretKey<ModularInt>& secret_key, int power, int variance,
+      const RnsGadget<ModularInt>* gadget, absl::string_view prng_pad_seed,
+      PrngType prng_type) {
+    return CreateWithRandomPad(std::move(key_pads), secret_key, power, variance,
+                               gadget, prng_pad_seed, prng_type);
+  }
+
+  // Creates a Galois key from the "a" and "b" polynomials composing the key.
+  static absl::StatusOr<RnsGaloisKey> CreateFromKeyComponents(
+      std::vector<RnsPolynomial<ModularInt>> key_as,
+      std::vector<RnsPolynomial<ModularInt>> key_bs, int power,
+      const RnsGadget<ModularInt>* gadget,
+      std::vector<const PrimeModulus<ModularInt>*> moduli,
+      absl::string_view prng_seed, PrngType prng_type);
+
+  static absl::StatusOr<RnsGaloisKey> Deserialize(
+      const SerializedRnsGaloisKey& serialized,
+      const RnsGadget<ModularInt>* gadget,
+      std::vector<const PrimeModulus<ModularInt>*> moduli);
+
+  absl::StatusOr<SerializedRnsGaloisKey> Serialize() const {
+    SerializedRnsGaloisKey output;
+    for (auto const& key_b : key_bs_) {
+      RLWE_ASSIGN_OR_RETURN(*output.add_key_bs(), key_b.Serialize(moduli_));
+    }
+    output.set_power(power_);
+    output.set_prng_seed(prng_seed_);
+    output.set_prng_type(prng_type_);
+    return output;
+  }
+
   // Applies the galois key to a BGV ciphertext.
   absl::StatusOr<RnsBgvCiphertext<ModularInt>> ApplyTo(
-      const RnsBgvCiphertext<ModularInt>& ciphertext) const;
+      const RnsBgvCiphertext<ModularInt>& ciphertext) const {
+    // First, key-switch the ciphertext as a generic RLWE ciphertext.
+    RLWE_ASSIGN_OR_RETURN(std::vector<RnsPolynomial<ModularInt>> components_new,
+                          ApplyToRlweCiphertext(ciphertext));
+    // Compute the error bound in the new ciphertext.
+    double error = ErrorAfterApplication(ciphertext);
+    return RnsBgvCiphertext<ModularInt>(std::move(components_new), moduli_,
+                                        /*power=*/1, error,
+                                        ciphertext.ErrorParams());
+  }
 
   // Applies the galois key to a BFV ciphertext
   absl::StatusOr<RnsBfvCiphertext<ModularInt>> ApplyTo(
-      const RnsBfvCiphertext<ModularInt>& ciphertext) const;
+      const RnsBfvCiphertext<ModularInt>& ciphertext) const {
+    // First, key-switch the ciphertext as a generic RLWE ciphertext.
+    RLWE_ASSIGN_OR_RETURN(std::vector<RnsPolynomial<ModularInt>> components_new,
+                          ApplyToRlweCiphertext(ciphertext));
+    // Compute the error bound in the new ciphertext.
+    double error = ErrorAfterApplication(ciphertext);
+    return RnsBfvCiphertext<ModularInt>(
+        std::move(components_new), moduli_,
+        /*power=*/1, error, ciphertext.ErrorParams(), ciphertext.Context());
+  }
+
+  // Returns the "a" part of the key-switched ciphertext that is the result of
+  // applying the Galois key to a ciphertext whose "a" part's gadget
+  // decomposition is given in `ciphertext_pad_digits`.
+  absl::StatusOr<RnsPolynomial<ModularInt>> PrecomputeRandomPad(
+      const std::vector<RnsPolynomial<ModularInt>>& ciphertext_pad_digits)
+      const;
+
+  // Applies the galois key to a BGV ciphertext, where the gadget decomposition
+  // of the "a" part of `ciphertext` is given in `ciphertext_pad_digits`, and
+  // the "a" part of the resulting ciphertext is given in `ciphertext_pad_new`.
+  absl::StatusOr<RnsBgvCiphertext<ModularInt>> ApplyToWithRandomPad(
+      const RnsBgvCiphertext<ModularInt>& ciphertext,
+      const std::vector<RnsPolynomial<ModularInt>>& ciphertext_pad_digits,
+      RnsPolynomial<ModularInt> ciphertext_pad_new) const {
+    RLWE_ASSIGN_OR_RETURN(
+        RnsPolynomial<ModularInt> c0_new,
+        ApplyToRlweCiphertextWithRandomPad(ciphertext, ciphertext_pad_digits,
+                                           ciphertext_pad_new));
+    double error = ErrorAfterApplication(ciphertext);
+    return RnsBgvCiphertext<ModularInt>(
+        {std::move(c0_new), std::move(ciphertext_pad_new)}, moduli_,
+        /*power_of_s=*/1, error, ciphertext.ErrorParams());
+  }
+
+  // Applies the galois key to a BFV ciphertext, where the gadget decomposition
+  // of the "a" part of `ciphertext` is given in `ciphertext_pad_digits`, and
+  // the "a" part of the resulting ciphertext is given in `ciphertext_pad_new`.
+  absl::StatusOr<RnsBfvCiphertext<ModularInt>> ApplyToWithRandomPad(
+      const RnsBfvCiphertext<ModularInt>& ciphertext,
+      const std::vector<RnsPolynomial<ModularInt>>& ciphertext_pad_digits,
+      RnsPolynomial<ModularInt> ciphertext_pad_new) const {
+    RLWE_ASSIGN_OR_RETURN(
+        RnsPolynomial<ModularInt> c0_new,
+        ApplyToRlweCiphertextWithRandomPad(ciphertext, ciphertext_pad_digits,
+                                           ciphertext_pad_new));
+    double error = ErrorAfterApplication(ciphertext);
+    return RnsBfvCiphertext<ModularInt>(
+        {std::move(c0_new), std::move(ciphertext_pad_new)}, moduli_,
+        /*power_of_s=*/1, error, ciphertext.ErrorParams(),
+        ciphertext.Context());
+  }
 
   // Accessors to the key components.
   const std::vector<RnsPolynomial<ModularInt>>& GetKeyA() const {
@@ -107,6 +225,15 @@ class RnsGaloisKey {
       const RnsGadget<ModularInt>* gadget, PrngType prng_type,
       Integer error_scalar = 1);
 
+  // Factory function that samples a Galois key derived from `secret_key` for
+  // the given power, using the given random polynomials `pads` as the "a" part
+  // of the Galois key.
+  static absl::StatusOr<RnsGaloisKey> CreateWithRandomPad(
+      std::vector<RnsPolynomial<ModularInt>> pads,
+      const RnsRlweSecretKey<ModularInt>& secret_key, int power, int variance,
+      const RnsGadget<ModularInt>* gadget, absl::string_view prng_pad_seed,
+      PrngType prng_type, Integer error_scalar = 1);
+
   explicit RnsGaloisKey(std::vector<RnsPolynomial<ModularInt>> key_as,
                         std::vector<RnsPolynomial<ModularInt>> key_bs,
                         const RnsGadget<ModularInt>* gadget, int power,
@@ -124,6 +251,23 @@ class RnsGaloisKey {
   // component polynomials of the resulting ciphertext.
   absl::StatusOr<std::vector<RnsPolynomial<ModularInt>>> ApplyToRlweCiphertext(
       const RnsRlweCiphertext<ModularInt>& ciphertext) const;
+
+  // Applies the galois key to a generic RLWE ciphertext with given gadget
+  // decomposition of "a" part of `ciphertext` and the "a" part of the resulting
+  // ciphertext, and returns the "b" part polynomial of the resulting
+  // ciphertext.
+  absl::StatusOr<RnsPolynomial<ModularInt>> ApplyToRlweCiphertextWithRandomPad(
+      const RnsRlweCiphertext<ModularInt>& ciphertext,
+      const std::vector<RnsPolynomial<ModularInt>>& ciphertext_pad_digits,
+      const RnsPolynomial<ModularInt>& ciphertext_pad_new) const;
+
+  double ErrorAfterApplication(
+      const RnsRlweCiphertext<ModularInt>& ciphertext) const {
+    return ciphertext.Error() +
+           ciphertext.ErrorParams()->BoundOnGadgetBasedKeySwitching(
+               /*num_components=*/1, gadget_->LogGadgetBase(),
+               gadget_->Dimension());
+  }
 
   // The two columns of the key matrix.
   std::vector<RnsPolynomial<ModularInt>> key_as_;

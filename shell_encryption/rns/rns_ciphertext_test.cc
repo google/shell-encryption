@@ -33,6 +33,7 @@
 #include "shell_encryption/rns/rns_modulus.h"
 #include "shell_encryption/rns/rns_polynomial.h"
 #include "shell_encryption/rns/rns_secret_key.h"
+#include "shell_encryption/rns/serialization.pb.h"
 #include "shell_encryption/rns/testing/parameters.h"
 #include "shell_encryption/testing/parameters.h"
 #include "shell_encryption/testing/status_matchers.h"
@@ -333,6 +334,200 @@ TYPED_TEST(RnsCiphertextTest, AbsorbScalarFailsIfModuliMismatch) {
                        HasSubstr(absl::StrCat("`scalar_mod_qs` must contain ",
                                               this->moduli_.size(),
                                               " modular integers"))));
+}
+
+TYPED_TEST(RnsCiphertextTest, FusedAbsorbAddInPlaceFailsIfDegreeMismatch) {
+  ASSERT_OK_AND_ASSIGN(auto zero,
+                       RnsPolynomial<TypeParam>::CreateZero(
+                           this->rns_context_->LogN(), this->moduli_));
+  RnsRlweCiphertext<TypeParam> ct_at_degree1(
+      /*components=*/{zero, zero}, this->moduli_,
+      /*power_of_s=*/1, /*error=*/0, this->error_params_.get());
+  RnsRlweCiphertext<TypeParam> ct_at_degree2(
+      /*components=*/{zero, zero, zero}, this->moduli_,
+      /*power_of_s=*/1, /*error=*/0, this->error_params_.get());
+  ASSERT_EQ(ct_at_degree1.Degree(), 1);
+  ASSERT_EQ(ct_at_degree2.Degree(), 2);
+  EXPECT_THAT(ct_at_degree1.FusedAbsorbAddInPlace(ct_at_degree2, zero),
+              StatusIs(absl::StatusCode::kInvalidArgument,
+                       HasSubstr("`ctxt` has a mismatched degree")));
+}
+
+TYPED_TEST(RnsCiphertextTest, FusedAbsorbAddInPlaceFailsIfLevelMismatch) {
+  // This test requires at least two RNS moduli.
+  if (this->moduli_.size() <= 1) {
+    return;
+  }
+
+  std::vector<const PrimeModulus<TypeParam>*> small_moduli = this->moduli_;
+  small_moduli.pop_back();
+
+  ASSERT_OK_AND_ASSIGN(auto zero,
+                       RnsPolynomial<TypeParam>::CreateZero(
+                           this->rns_context_->LogN(), this->moduli_));
+  ASSERT_OK_AND_ASSIGN(auto zero_lower_level,
+                       RnsPolynomial<TypeParam>::CreateZero(
+                           this->rns_context_->LogN(), small_moduli));
+  RnsRlweCiphertext<TypeParam> ct(
+      /*components=*/{zero, zero}, this->moduli_,
+      /*power_of_s=*/1, /*error=*/0, this->error_params_.get());
+  RnsRlweCiphertext<TypeParam> ct_lower_level(
+      /*components=*/{zero, zero}, small_moduli,
+      /*power_of_s=*/1, /*error=*/0, this->error_params_.get());
+  ASSERT_NE(ct.Level(), ct_lower_level.Level());
+  EXPECT_THAT(ct.FusedAbsorbAddInPlace(ct_lower_level, zero),
+              StatusIs(absl::StatusCode::kInvalidArgument,
+                       HasSubstr("`ctxt` has a mismatched level")));
+}
+
+TYPED_TEST(RnsCiphertextTest, FusedAbsorbAddInPlaceFailsIfPowerOfSMismatch) {
+  ASSERT_OK_AND_ASSIGN(auto zero,
+                       RnsPolynomial<TypeParam>::CreateZero(
+                           this->rns_context_->LogN(), this->moduli_));
+  RnsRlweCiphertext<TypeParam> ct0(
+      /*components=*/{zero, zero}, this->moduli_,
+      /*power_of_s=*/1, /*error=*/0, this->error_params_.get());
+  RnsRlweCiphertext<TypeParam> ct1(
+      /*components=*/{zero, zero}, this->moduli_,
+      /*power_of_s=*/5, /*error=*/0, this->error_params_.get());
+  ASSERT_EQ(ct0.PowerOfS(), 1);
+  ASSERT_EQ(ct1.PowerOfS(), 5);
+  EXPECT_THAT(ct0.FusedAbsorbAddInPlace(ct1, zero),
+              StatusIs(absl::StatusCode::kInvalidArgument,
+                       HasSubstr("`ctxt` has a mismatched key power")));
+}
+
+TYPED_TEST(RnsCiphertextTest,
+           FusedAbsorbAddInPlaceWithoutPadFailsIfNotDegreeOne) {
+  ASSERT_OK_AND_ASSIGN(auto zero,
+                       RnsPolynomial<TypeParam>::CreateZero(
+                           this->rns_context_->LogN(), this->moduli_));
+  RnsRlweCiphertext<TypeParam> ct_at_degree1(
+      /*components=*/{zero, zero}, this->moduli_,
+      /*power_of_s=*/1, /*error=*/0, this->error_params_.get());
+  RnsRlweCiphertext<TypeParam> ct_at_degree2(
+      /*components=*/{zero, zero, zero}, this->moduli_,
+      /*power_of_s=*/1, /*error=*/0, this->error_params_.get());
+  ASSERT_EQ(ct_at_degree1.Degree(), 1);
+  ASSERT_EQ(ct_at_degree2.Degree(), 2);
+
+  EXPECT_THAT(
+      ct_at_degree1.FusedAbsorbAddInPlaceWithoutPad(ct_at_degree2, zero),
+      StatusIs(absl::StatusCode::kInvalidArgument,
+               HasSubstr("only applies to degree 1 ciphertext")));
+  EXPECT_THAT(
+      ct_at_degree2.FusedAbsorbAddInPlaceWithoutPad(ct_at_degree1, zero),
+      StatusIs(absl::StatusCode::kInvalidArgument,
+               HasSubstr("only applies to degree 1 ciphertext")));
+}
+
+TYPED_TEST(RnsCiphertextTest,
+           FusedAbsorbAddInPlaceWithoutPadFailsIfLevelMismatch) {
+  // This test requires at least two RNS moduli.
+  if (this->moduli_.size() <= 1) {
+    return;
+  }
+
+  std::vector<const PrimeModulus<TypeParam>*> small_moduli = this->moduli_;
+  small_moduli.pop_back();
+
+  ASSERT_OK_AND_ASSIGN(auto zero,
+                       RnsPolynomial<TypeParam>::CreateZero(
+                           this->rns_context_->LogN(), this->moduli_));
+  ASSERT_OK_AND_ASSIGN(auto zero_lower_level,
+                       RnsPolynomial<TypeParam>::CreateZero(
+                           this->rns_context_->LogN(), small_moduli));
+  RnsRlweCiphertext<TypeParam> ct(
+      /*components=*/{zero, zero}, this->moduli_,
+      /*power_of_s=*/1, /*error=*/0, this->error_params_.get());
+  RnsRlweCiphertext<TypeParam> ct_lower_level(
+      /*components=*/{zero, zero}, small_moduli,
+      /*power_of_s=*/1, /*error=*/0, this->error_params_.get());
+  ASSERT_NE(ct.Level(), ct_lower_level.Level());
+  EXPECT_THAT(ct.FusedAbsorbAddInPlaceWithoutPad(ct_lower_level, zero),
+              StatusIs(absl::StatusCode::kInvalidArgument,
+                       HasSubstr("`ctxt` has a mismatched level")));
+}
+
+TYPED_TEST(RnsCiphertextTest,
+           FusedAbsorbAddInPlaceWithoutPadFailsIfPowerOfSMismatch) {
+  ASSERT_OK_AND_ASSIGN(auto zero,
+                       RnsPolynomial<TypeParam>::CreateZero(
+                           this->rns_context_->LogN(), this->moduli_));
+  RnsRlweCiphertext<TypeParam> ct0(
+      /*components=*/{zero, zero}, this->moduli_,
+      /*power_of_s=*/1, /*error=*/0, this->error_params_.get());
+  RnsRlweCiphertext<TypeParam> ct1(
+      /*components=*/{zero, zero}, this->moduli_,
+      /*power_of_s=*/5, /*error=*/0, this->error_params_.get());
+  ASSERT_EQ(ct0.PowerOfS(), 1);
+  ASSERT_EQ(ct1.PowerOfS(), 5);
+  EXPECT_THAT(ct0.FusedAbsorbAddInPlaceWithoutPad(ct1, zero),
+              StatusIs(absl::StatusCode::kInvalidArgument,
+                       HasSubstr("`ctxt` has a mismatched key power")));
+}
+
+TYPED_TEST(RnsCiphertextTest, SetPadComponentFailsIfNotDegreeOne) {
+  ASSERT_OK_AND_ASSIGN(auto zero,
+                       RnsPolynomial<TypeParam>::CreateZero(
+                           this->rns_context_->LogN(), this->moduli_));
+  RnsRlweCiphertext<TypeParam> ct_at_degree2(
+      /*components=*/{zero, zero, zero}, this->moduli_,
+      /*power_of_s=*/1, /*error=*/0, this->error_params_.get());
+  ASSERT_EQ(ct_at_degree2.Degree(), 2);
+
+  EXPECT_THAT(ct_at_degree2.SetPadComponent(zero),
+              StatusIs(absl::StatusCode::kInvalidArgument,
+                       HasSubstr("only applies to degree 1 ciphertext")));
+}
+
+TYPED_TEST(RnsCiphertextTest, DeserializeFailsIfErrorParamsIsNull) {
+  if (sizeof(TypeParam) > sizeof(Uint32)) {
+    GTEST_SKIP() << "Skip negative test for large integer types.";
+  }
+
+  ASSERT_OK_AND_ASSIGN(auto zero,
+                       RnsPolynomial<TypeParam>::CreateZero(
+                           this->rns_context_->LogN(), this->moduli_));
+  RnsRlweCiphertext<TypeParam> ciphertext(
+      /*components=*/{zero, zero}, this->moduli_,
+      /*power_of_s=*/1, /*error=*/0, this->error_params_.get());
+  ASSERT_OK_AND_ASSIGN(SerializedRnsRlweCiphertext serialized,
+                       ciphertext.Serialize());
+}
+
+TYPED_TEST(RnsCiphertextTest, SerializedDeserializes) {
+  constexpr int k_power_of_s = 5;
+  // Create a hypothetical ciphertext.
+  ASSERT_OK_AND_ASSIGN(auto c0, RnsPolynomial<TypeParam>::SampleUniform(
+                                    this->rns_context_->LogN(),
+                                    this->prng_.get(), this->moduli_));
+  ASSERT_OK_AND_ASSIGN(auto c1, RnsPolynomial<TypeParam>::SampleUniform(
+                                    this->rns_context_->LogN(),
+                                    this->prng_.get(), this->moduli_));
+  RnsRlweCiphertext<TypeParam> ciphertext(
+      /*components=*/{std::move(c0), std::move(c1)}, this->moduli_,
+      k_power_of_s, this->error_params_->B_secretkey_encryption(),
+      this->error_params_.get());
+
+  ASSERT_OK_AND_ASSIGN(SerializedRnsRlweCiphertext serialized,
+                       ciphertext.Serialize());
+  ASSERT_OK_AND_ASSIGN(
+      RnsRlweCiphertext<TypeParam> deserialized,
+      RnsRlweCiphertext<TypeParam>::Deserialize(serialized, this->moduli_,
+                                                this->error_params_.get()));
+  ASSERT_EQ(deserialized.Degree(), ciphertext.Degree());
+  ASSERT_EQ(deserialized.Level(), ciphertext.Level());
+  ASSERT_EQ(deserialized.NumCoeffs(), ciphertext.NumCoeffs());
+  ASSERT_EQ(deserialized.NumModuli(), ciphertext.NumModuli());
+  ASSERT_EQ(deserialized.ErrorParams(), ciphertext.ErrorParams());
+  ASSERT_EQ(deserialized.PowerOfS(), ciphertext.PowerOfS());
+  ASSERT_EQ(deserialized.Error(), ciphertext.Error());
+  for (int i = 0; i < ciphertext.Len(); ++i) {
+    ASSERT_OK_AND_ASSIGN(auto deserialized_ci, deserialized.Component(i));
+    ASSERT_OK_AND_ASSIGN(auto ciphertext_ci, ciphertext.Component(i));
+    EXPECT_EQ(deserialized_ci, ciphertext_ci);
+  }
 }
 
 }  // namespace

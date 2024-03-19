@@ -33,6 +33,7 @@
 #include "shell_encryption/rns/crt_interpolation.h"
 #include "shell_encryption/rns/rns_context.h"
 #include "shell_encryption/rns/rns_modulus.h"
+#include "shell_encryption/rns/serialization.pb.h"
 #include "shell_encryption/rns/testing/parameters.h"
 #include "shell_encryption/rns/testing/testing_utils.h"
 #include "shell_encryption/status_macros.h"
@@ -2535,6 +2536,70 @@ TYPED_TEST(RnsPolynomialTest, ReplaceSubPolynomialAtFailsIfIndexOutOfRange) {
   EXPECT_THAT(
       a.ReplaceSubPolynomialAt(num_existing_moduli, zero_q0),
       StatusIs(absl::StatusCode::kInvalidArgument, HasSubstr("out of bound")));
+}
+
+TYPED_TEST(RnsPolynomialTest, DeserializeFailsIfLogNIsNonPositive) {
+  ASSERT_OK_AND_ASSIGN(RnsPolynomial<TypeParam> a,
+                       RnsPolynomial<TypeParam>::CreateZero(
+                           this->rns_context_->LogN(), this->moduli_));
+  ASSERT_OK_AND_ASSIGN(SerializedRnsPolynomial serialized,
+                       a.Serialize(this->moduli_));
+  serialized.set_log_n(0);
+  EXPECT_THAT(RnsPolynomial<TypeParam>::Deserialize(serialized, this->moduli_),
+              StatusIs(absl::StatusCode::kInvalidArgument, HasSubstr("log_n")));
+  serialized.set_log_n(-1);
+  EXPECT_THAT(RnsPolynomial<TypeParam>::Deserialize(serialized, this->moduli_),
+              StatusIs(absl::StatusCode::kInvalidArgument, HasSubstr("log_n")));
+}
+
+TYPED_TEST(RnsPolynomialTest, DeserializeFailsIfIncorrectNumberOfCoeffVectors) {
+  ASSERT_OK_AND_ASSIGN(RnsPolynomial<TypeParam> a,
+                       RnsPolynomial<TypeParam>::CreateZero(
+                           this->rns_context_->LogN(), this->moduli_));
+  ASSERT_OK_AND_ASSIGN(SerializedRnsPolynomial serialized,
+                       a.Serialize(this->moduli_));
+  // Append a coefficient vector to the serialized object.
+  serialized.add_coeff_vectors("");
+  EXPECT_THAT(RnsPolynomial<TypeParam>::Deserialize(serialized, this->moduli_),
+              StatusIs(absl::StatusCode::kInvalidArgument,
+                       HasSubstr("Number of serialized coefficient vectors")));
+}
+
+TYPED_TEST(RnsPolynomialTest, SerializeFailsIfIncorrectNumberOfModuli) {
+  ASSERT_OK_AND_ASSIGN(RnsPolynomial<TypeParam> a,
+                       RnsPolynomial<TypeParam>::CreateZero(
+                           this->rns_context_->LogN(), this->moduli_));
+  int num_moduli = this->moduli_.size();
+  EXPECT_THAT(
+      a.Serialize(absl::MakeSpan(this->moduli_).subspan(0, num_moduli - 1)),
+      StatusIs(absl::StatusCode::kInvalidArgument, HasSubstr("moduli")));
+}
+
+TYPED_TEST(RnsPolynomialTest, SerializedDeserializes) {
+  ASSERT_OK_AND_ASSIGN(RnsPolynomial<TypeParam> a, this->SampleRnsPolynomial());
+  ASSERT_OK_AND_ASSIGN(SerializedRnsPolynomial serialized1,
+                       a.Serialize(this->moduli_));
+  EXPECT_EQ(serialized1.log_n(), a.LogN());
+  EXPECT_EQ(serialized1.is_ntt(), a.IsNttForm());
+  EXPECT_EQ(serialized1.coeff_vectors_size(), this->moduli_.size());
+
+  ASSERT_OK_AND_ASSIGN(
+      RnsPolynomial<TypeParam> deserialized1,
+      RnsPolynomial<TypeParam>::Deserialize(serialized1, this->moduli_));
+  EXPECT_EQ(deserialized1, a);
+
+  // Change the format (Coefficient <-> NTT forms) and serialize again.
+  if (a.IsNttForm()) {
+    ASSERT_OK(a.ConvertToCoeffForm(this->moduli_));
+  } else {
+    ASSERT_OK(a.ConvertToNttForm(this->moduli_));
+  }
+  ASSERT_OK_AND_ASSIGN(SerializedRnsPolynomial serialized2,
+                       a.Serialize(this->moduli_));
+  ASSERT_OK_AND_ASSIGN(
+      RnsPolynomial<TypeParam> deserialized2,
+      RnsPolynomial<TypeParam>::Deserialize(serialized2, this->moduli_));
+  EXPECT_EQ(deserialized2, a);
 }
 
 }  // namespace

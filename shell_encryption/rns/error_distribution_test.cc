@@ -15,9 +15,11 @@
 
 #include "shell_encryption/rns/error_distribution.h"
 
+#include <algorithm>
 #include <cstdint>
 #include <cstdlib>
 #include <memory>
+#include <utility>
 #include <vector>
 
 #include <gmock/gmock.h>
@@ -30,6 +32,7 @@
 #include "shell_encryption/rns/rns_modulus.h"
 #include "shell_encryption/rns/rns_polynomial.h"
 #include "shell_encryption/rns/testing/parameters.h"
+#include "shell_encryption/sampler/discrete_gaussian.h"
 #include "shell_encryption/testing/parameters.h"
 #include "shell_encryption/testing/status_matchers.h"
 #include "shell_encryption/testing/status_testing.h"
@@ -41,7 +44,8 @@ using Prng = SingleThreadHkdfPrng;
 using ::rlwe::testing::StatusIs;
 using ::testing::HasSubstr;
 
-constexpr int kVariance = 8;  // Common error variance.
+constexpr int kVariance = 8;             // Common error variance.
+constexpr double kBaseGaussianS = 12.8;  // For the base Gaussian distribution.
 constexpr absl::string_view kPrngSeed =
     "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 
@@ -68,6 +72,12 @@ class ErrorDistributionTest : public ::testing::Test {
     auto prng = Prng::Create(kPrngSeed.substr(0, Prng::SeedLength()));
     CHECK(prng.ok());
     prng_ = std::move(prng.value());
+  }
+
+  void SetUpGaussianSampler() {
+    auto sampler = DiscreteGaussianSampler<Integer>::Create(kBaseGaussianS);
+    CHECK(sampler.ok());
+    dg_sampler_ = std::move(sampler.value());
   }
 
   // Convert a vector `coeffs` of balanced mod q integers to their signed
@@ -98,8 +108,8 @@ class ErrorDistributionTest : public ::testing::Test {
   std::unique_ptr<const RnsContext<ModularInt>> rns_context_;
   std::vector<const PrimeModulus<ModularInt>*> moduli_;
   std::unique_ptr<Prng> prng_;
+  std::unique_ptr<const DiscreteGaussianSampler<Integer>> dg_sampler_;
 };
-
 TYPED_TEST_SUITE(ErrorDistributionTest, testing::ModularIntTypes);
 
 // Unit tests for `SampleError()`.
@@ -167,6 +177,120 @@ TYPED_TEST(ErrorDistributionTest,
     EXPECT_LT(e_coeff_abs, 2 * kVariance + 1);
   }
   EXPECT_GT(e_coeff_max, 0);
+}
+
+// Tests for `SampleUniformTernary`.
+TYPED_TEST(ErrorDistributionTest,
+           SampleUniformTernaryFailsIfLogNIsNotPositive) {
+  EXPECT_THAT(SampleUniformTernary<TypeParam>(
+                  /*log_n=*/-1, this->moduli_, this->prng_.get()),
+              StatusIs(absl::StatusCode::kInvalidArgument,
+                       HasSubstr("`log_n` must be positive")));
+  EXPECT_THAT(SampleUniformTernary<TypeParam>(
+                  /*log_n=*/0, this->moduli_, this->prng_.get()),
+              StatusIs(absl::StatusCode::kInvalidArgument,
+                       HasSubstr("`log_n` must be positive")));
+}
+
+TYPED_TEST(ErrorDistributionTest, SampleUniformTernaryFailsIfModuliIsEmpty) {
+  int log_n = this->rns_context_->LogN();
+  EXPECT_THAT(
+      SampleUniformTernary<TypeParam>(log_n, /*moduli=*/{}, this->prng_.get()),
+      StatusIs(absl::StatusCode::kInvalidArgument,
+               HasSubstr("`moduli` must not be empty")));
+}
+
+TYPED_TEST(ErrorDistributionTest,
+           SampleUniformTernaryReturnsPolynomialWithTernaryCoefficients) {
+  int log_n = this->rns_context_->LogN();
+  ASSERT_OK_AND_ASSIGN(
+      RnsPolynomial<TypeParam> e,
+      SampleUniformTernary<TypeParam>(log_n, this->moduli_, this->prng_.get()));
+  ASSERT_EQ(e.NumModuli(), this->moduli_.size());
+  ASSERT_EQ(e.NumCoeffs(), 1 << log_n);
+  ASSERT_TRUE(e.IsNttForm());
+
+  // When in the coefficient form, e (mod qi) and e (mod qj) should represent
+  // the same integer values in {-1, 0, 1} for all RNS moduli qi and qj.
+  ASSERT_OK(e.ConvertToCoeffForm(this->moduli_));
+  std::vector<int32_t> e_coeffs_q0 = this->ConvertToSignedIntegerValues(
+      e.Coeffs()[0], this->moduli_[0]->ModParams());
+  for (int k = 0; k < e_coeffs_q0.size(); ++k) {
+    EXPECT_TRUE(e_coeffs_q0[k] <= 1 || e_coeffs_q0[k] == -1);
+  }
+  for (int i = 1; i < this->moduli_.size(); ++i) {
+    std::vector<int32_t> e_coeffs_qi = this->ConvertToSignedIntegerValues(
+        e.Coeffs()[i], this->moduli_[i]->ModParams());
+    EXPECT_EQ(e_coeffs_q0, e_coeffs_qi);
+  }
+}
+
+// Tests for `SampleDiscreteGaussian`.
+TYPED_TEST(ErrorDistributionTest,
+           SampleDiscreteGaussianFailsIfLogNIsNotPositive) {
+  this->SetUpGaussianSampler();
+  EXPECT_THAT(SampleDiscreteGaussian<TypeParam>(
+                  /*log_n=*/-1, kBaseGaussianS, this->moduli_,
+                  this->dg_sampler_.get(), this->prng_.get()),
+              StatusIs(absl::StatusCode::kInvalidArgument,
+                       HasSubstr("`log_n` must be positive")));
+  EXPECT_THAT(SampleDiscreteGaussian<TypeParam>(
+                  /*log_n=*/0, kBaseGaussianS, this->moduli_,
+                  this->dg_sampler_.get(), this->prng_.get()),
+              StatusIs(absl::StatusCode::kInvalidArgument,
+                       HasSubstr("`log_n` must be positive")));
+}
+
+TYPED_TEST(ErrorDistributionTest, SampleDiscreteGaussianFailsIfModuliIsEmpty) {
+  this->SetUpGaussianSampler();
+  int log_n = this->rns_context_->LogN();
+  EXPECT_THAT(SampleDiscreteGaussian<TypeParam>(
+                  log_n, kBaseGaussianS, /*moduli=*/{}, this->dg_sampler_.get(),
+                  this->prng_.get()),
+              StatusIs(absl::StatusCode::kInvalidArgument,
+                       HasSubstr("`moduli` must not be empty")));
+}
+
+TYPED_TEST(ErrorDistributionTest, SampleDiscreteGaussianFailsIfSamplerIsNull) {
+  int log_n = this->rns_context_->LogN();
+  EXPECT_THAT(SampleDiscreteGaussian<TypeParam>(
+                  log_n, kBaseGaussianS, this->moduli_, /*dg_sampler=*/nullptr,
+                  this->prng_.get()),
+              StatusIs(absl::StatusCode::kInvalidArgument,
+                       HasSubstr("`dg_sampler` must not be null")));
+}
+
+TYPED_TEST(ErrorDistributionTest,
+           SampleDiscreteGaussianReturnsPolynomialWithBoundedCoefficients) {
+  this->SetUpGaussianSampler();
+  int log_n = this->rns_context_->LogN();
+  ASSERT_OK_AND_ASSIGN(RnsPolynomial<TypeParam> e,
+                       SampleDiscreteGaussian<TypeParam>(
+                           log_n, kBaseGaussianS, this->moduli_,
+                           this->dg_sampler_.get(), this->prng_.get()));
+  ASSERT_EQ(e.NumModuli(), this->moduli_.size());
+  ASSERT_EQ(e.NumCoeffs(), 1 << log_n);
+
+  // We choose a small standard deviation s such that e (mod qi) and e (mod qj)
+  // should represent the same integer values for all RNS moduli qi and qj.
+  // Moreover, the coefficients should have bounded values.
+  std::vector<int32_t> e_coeffs_q0 = this->ConvertToSignedIntegerValues(
+      e.Coeffs()[0], this->moduli_[0]->ModParams());
+  for (int i = 1; i < this->moduli_.size(); ++i) {
+    std::vector<int32_t> e_coeffs_qi = this->ConvertToSignedIntegerValues(
+        e.Coeffs()[i], this->moduli_[i]->ModParams());
+    EXPECT_EQ(e_coeffs_q0, e_coeffs_qi);
+  }
+
+  auto [e_coeff_min, e_coeff_max] =
+      std::minmax_element(e_coeffs_q0.begin(), e_coeffs_q0.end());
+  int32_t coeff_max_bound = static_cast<int32_t>(
+      DiscreteGaussianSampler<typename TypeParam::Int>::kTailBoundMultiplier *
+      kBaseGaussianS);
+  EXPECT_GT(*e_coeff_max, 0);
+  EXPECT_LT(*e_coeff_max, coeff_max_bound);
+  EXPECT_GT(*e_coeff_min, -coeff_max_bound);
+  EXPECT_LT(*e_coeff_min, 0);
 }
 
 }  // namespace

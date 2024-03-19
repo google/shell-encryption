@@ -20,10 +20,13 @@
 #include <utility>
 #include <vector>
 
+#include "absl/log/check.h"
 #include "absl/numeric/int128.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/str_cat.h"
+#include "absl/strings/string_view.h"
+#include "absl/types/span.h"
 #include "shell_encryption/integral_types.h"
 #include "shell_encryption/montgomery.h"
 #include "shell_encryption/prng/prng.h"
@@ -46,6 +49,67 @@ absl::StatusOr<RnsGaloisKey<ModularInt>> RnsGaloisKey<ModularInt>::Create(
     const RnsRlweSecretKey<ModularInt>& secret_key, int power, int variance,
     const RnsGadget<ModularInt>* gadget, PrngType prng_type,
     Integer error_scalar) {
+  if (gadget == nullptr) {
+    return absl::InvalidArgumentError("`gadget` must not be null.");
+  }
+
+  // Sample a PRNG seed for sampling the random polynomials in `key_as`.
+  std::string prng_pad_seed;
+  if (prng_type == PRNG_TYPE_HKDF) {
+    RLWE_ASSIGN_OR_RETURN(prng_pad_seed, SingleThreadHkdfPrng::GenerateSeed());
+  } else if (prng_type == PRNG_TYPE_CHACHA) {
+    RLWE_ASSIGN_OR_RETURN(prng_pad_seed,
+                          SingleThreadChaChaPrng::GenerateSeed());
+  } else {
+    return absl::InvalidArgumentError("PrngType not specified correctly.");
+  }
+
+  // The Galois key is a k x 2 matrix [[b1, a1], ..., [bk, ak]], where each pair
+  // (bi, ai) is an RLWE encryption of the target secret gi * s(X^power) under
+  // the canonical secret key s(X). In the following, we first sample the random
+  // polynomials ai's, and then create bi's and hence the Galois key.
+  RLWE_ASSIGN_OR_RETURN(
+      std::vector<RnsPolynomial<ModularInt>> key_as,
+      SampleRandomPad(gadget->Dimension(), secret_key.LogN(),
+                      secret_key.Moduli(), prng_pad_seed, prng_type));
+
+  return CreateWithRandomPad(std::move(key_as), secret_key, power, variance,
+                             gadget, prng_pad_seed, prng_type, error_scalar);
+}
+
+template <typename ModularInt>
+absl::StatusOr<std::vector<RnsPolynomial<ModularInt>>>
+RnsGaloisKey<ModularInt>::SampleRandomPad(
+    int dimension, int log_n,
+    absl::Span<const PrimeModulus<ModularInt>* const> moduli,
+    absl::string_view prng_seed, PrngType prng_type) {
+  // Create a PRNG for sampling the random polynomials in `key_as`.
+  std::unique_ptr<SecurePrng> prng_pad;
+  if (prng_type == PRNG_TYPE_HKDF) {
+    RLWE_ASSIGN_OR_RETURN(prng_pad, SingleThreadHkdfPrng::Create(prng_seed));
+  } else if (prng_type == PRNG_TYPE_CHACHA) {
+    RLWE_ASSIGN_OR_RETURN(prng_pad, SingleThreadChaChaPrng::Create(prng_seed));
+  } else {
+    return absl::InvalidArgumentError("PrngType not specified correctly.");
+  }
+
+  std::vector<RnsPolynomial<ModularInt>> key_as;
+  key_as.reserve(dimension);
+  for (int i = 0; i < dimension; ++i) {
+    RLWE_ASSIGN_OR_RETURN(auto a, RnsPolynomial<ModularInt>::SampleUniform(
+                                      log_n, prng_pad.get(), moduli));
+    key_as.push_back(std::move(a));
+  }
+  return key_as;
+}
+
+template <typename ModularInt>
+absl::StatusOr<RnsGaloisKey<ModularInt>>
+RnsGaloisKey<ModularInt>::CreateWithRandomPad(
+    std::vector<RnsPolynomial<ModularInt>> pads,
+    const RnsRlweSecretKey<ModularInt>& secret_key, int power, int variance,
+    const RnsGadget<ModularInt>* gadget, absl::string_view prng_pad_seed,
+    PrngType prng_type, Integer error_scalar) {
   int log_n = secret_key.LogN();
   int num_coeffs = 1 << log_n;
   if (power < 0 || (power % 2) == 0 || power >= 2 * num_coeffs) {
@@ -60,29 +124,15 @@ absl::StatusOr<RnsGaloisKey<ModularInt>> RnsGaloisKey<ModularInt>::Create(
     return absl::InvalidArgumentError("`gadget` must not be null.");
   }
 
-  // The source key s(X^power), which is the secret polynomial under which the
-  // source ciphertexts are encrypted.
-  auto moduli = secret_key.Moduli();
-  const RnsPolynomial<ModularInt>& target_key = secret_key.Key();
-  RLWE_ASSIGN_OR_RETURN(auto source_key, target_key.Substitute(power, moduli));
-
-  // Create the PRNGs for sampling the random polynomials in `key_as` and for
-  // sampling the encryption randomness.
-  std::unique_ptr<SecurePrng> prng_pad, prng_encryption;
-  std::string prng_pad_seed, prng_encryption_seed;
+  // Create the PRNGs for sampling the encryption randomness.
+  std::unique_ptr<SecurePrng> prng_encryption;
+  std::string prng_encryption_seed;
   if (prng_type == PRNG_TYPE_HKDF) {
-    RLWE_ASSIGN_OR_RETURN(prng_pad_seed, SingleThreadHkdfPrng::GenerateSeed());
-    RLWE_ASSIGN_OR_RETURN(prng_pad,
-                          SingleThreadHkdfPrng::Create(prng_pad_seed));
     RLWE_ASSIGN_OR_RETURN(prng_encryption_seed,
                           SingleThreadHkdfPrng::GenerateSeed());
     RLWE_ASSIGN_OR_RETURN(prng_encryption,
                           SingleThreadHkdfPrng::Create(prng_encryption_seed));
   } else if (prng_type == PRNG_TYPE_CHACHA) {
-    RLWE_ASSIGN_OR_RETURN(prng_pad_seed,
-                          SingleThreadChaChaPrng::GenerateSeed());
-    RLWE_ASSIGN_OR_RETURN(prng_pad,
-                          SingleThreadChaChaPrng::Create(prng_pad_seed));
     RLWE_ASSIGN_OR_RETURN(prng_encryption_seed,
                           SingleThreadChaChaPrng::GenerateSeed());
     RLWE_ASSIGN_OR_RETURN(prng_encryption,
@@ -91,45 +141,97 @@ absl::StatusOr<RnsGaloisKey<ModularInt>> RnsGaloisKey<ModularInt>::Create(
     return absl::InvalidArgumentError("PrngType not specified correctly.");
   }
 
-  // The Galois key is a k x 2 matrix [[b1, a1], ..., [bk, ak]], where
+  // The source key s(X^power), which is the secret polynomial under which the
+  // source ciphertexts are encrypted.
+  auto moduli = secret_key.Moduli();
+  const RnsPolynomial<ModularInt>& target_key = secret_key.Key();
+  RLWE_ASSIGN_OR_RETURN(auto source_key, target_key.Substitute(power, moduli));
+
+  // The galois key is a k * 2 matrix [[b1, a1], ..., [bk, ak]], where
   // ai is uniformly random and bi = -ai * s + t * ei + gi * s(X^power), for
-  // gi = i'th component of the gadget and t = `error_scalar`. That is,
-  // conceptually, (bi, ai) is an encryption of the source secret s(X^power)
-  // under the target secret s(X). Note that t should be the plaintext modulus
-  // for BGV, and it should be 1 for other schemes.
+  // gi = i'th component of the gadget and t = `error_scalar`.
   int k = gadget->Dimension();
-  std::vector<RnsPolynomial<ModularInt>> key_as;
   std::vector<RnsPolynomial<ModularInt>> key_bs;
-  key_as.reserve(k);
   key_bs.reserve(k);
   for (int i = 0; i < k; ++i) {
-    // Sample a uniformly random polynomial u.
-    RLWE_ASSIGN_OR_RETURN(auto u, RnsPolynomial<ModularInt>::SampleUniform(
-                                      log_n, prng_pad.get(), moduli));
-
-    // gi * s(X^power)
     RnsPolynomial<ModularInt> secret = source_key;
     RLWE_RETURN_IF_ERROR(secret.MulInPlace(gadget->Component(i), moduli));
 
-    // bi = u * s(X) + t * ei + gi * s(X^power)
-    RLWE_ASSIGN_OR_RETURN(RnsPolynomial<ModularInt> b,
-                          SampleError<ModularInt>(log_n, variance, moduli,
-                                                  prng_encryption.get()));
-    RLWE_RETURN_IF_ERROR(b.MulInPlace(error_scalar, moduli));
-    RLWE_RETURN_IF_ERROR(b.AddInPlace(secret, moduli));
+    // a = -u
+    RLWE_ASSIGN_OR_RETURN(RnsPolynomial<ModularInt> u, pads[i].Negate(moduli));
+
+    RLWE_ASSIGN_OR_RETURN(
+        RnsPolynomial<ModularInt> b,
+        SampleError<ModularInt>(log_n, variance, moduli,
+                                prng_encryption.get()));       // b = e
+    RLWE_RETURN_IF_ERROR(b.MulInPlace(error_scalar, moduli));  // b = t * e
+    RLWE_RETURN_IF_ERROR(b.AddInPlace(secret, moduli));  // b = t * e + gi * s'
     RLWE_RETURN_IF_ERROR(b.FusedMulAddInPlace(u, target_key, moduli));
 
-    RLWE_RETURN_IF_ERROR(u.NegateInPlace(moduli));  // a = -u
-    key_as.push_back(std::move(u));
     key_bs.push_back(std::move(b));
   }
 
   // Store the RNS moduli.
   std::vector<const PrimeModulus<ModularInt>*> moduli_vector;
   moduli_vector.insert(moduli_vector.begin(), moduli.begin(), moduli.end());
+  return RnsGaloisKey(/*key_as=*/std::move(pads), std::move(key_bs), gadget,
+                      power, std::move(moduli_vector), prng_pad_seed,
+                      prng_type);
+}
 
+template <typename ModularInt>
+absl::StatusOr<RnsGaloisKey<ModularInt>>
+RnsGaloisKey<ModularInt>::CreateFromKeyComponents(
+    std::vector<RnsPolynomial<ModularInt>> key_as,
+    std::vector<RnsPolynomial<ModularInt>> key_bs, int power,
+    const RnsGadget<ModularInt>* gadget,
+    std::vector<const PrimeModulus<ModularInt>*> moduli,
+    absl::string_view prng_seed, PrngType prng_type) {
+  if (gadget == nullptr) {
+    return absl::InvalidArgumentError("`gadget` must not be null.");
+  }
+  if (key_as.size() != gadget->Dimension() ||
+      key_bs.size() != gadget->Dimension()) {
+    return absl::InvalidArgumentError(
+        "`key_as` and `key_bs` must have the same length as the gadget "
+        "dimension.");
+  }
   return RnsGaloisKey(std::move(key_as), std::move(key_bs), gadget, power,
-                      std::move(moduli_vector), prng_pad_seed, prng_type);
+                      std::move(moduli), prng_seed, prng_type);
+}
+
+template <typename ModularInt>
+absl::StatusOr<RnsGaloisKey<ModularInt>> RnsGaloisKey<ModularInt>::Deserialize(
+    const SerializedRnsGaloisKey& serialized,
+    const RnsGadget<ModularInt>* gadget,
+    std::vector<const PrimeModulus<ModularInt>*> moduli) {
+  if (gadget == nullptr) {
+    return absl::InvalidArgumentError("`gadget` must not be null.");
+  }
+
+  int dimension = serialized.key_bs_size();
+  if (dimension <= 0) {
+    return absl::InvalidArgumentError("`key_bs` must not be empty.");
+  }
+
+  std::vector<RnsPolynomial<ModularInt>> key_bs;
+  key_bs.reserve(dimension);
+  for (int i = 0; i < dimension; ++i) {
+    RLWE_ASSIGN_OR_RETURN(
+        RnsPolynomial<ModularInt> key_b,
+        RnsPolynomial<ModularInt>::Deserialize(serialized.key_bs(i), moduli));
+    key_bs.push_back(std::move(key_b));
+  }
+
+  // Sample the random polynomials in `key_as` using the given PRNG seed.
+  RLWE_ASSIGN_OR_RETURN(
+      std::vector<RnsPolynomial<ModularInt>> key_as,
+      SampleRandomPad(dimension, key_bs[0].LogN(), moduli,
+                      serialized.prng_seed(), serialized.prng_type()));
+
+  return RnsGaloisKey(std::move(key_as), std::move(key_bs), gadget,
+                      serialized.power(), std::move(moduli),
+                      serialized.prng_seed(), serialized.prng_type());
 }
 
 template <typename ModularInt>
@@ -184,39 +286,63 @@ RnsGaloisKey<ModularInt>::ApplyToRlweCiphertext(
 }
 
 template <typename ModularInt>
-absl::StatusOr<RnsBgvCiphertext<ModularInt>> RnsGaloisKey<ModularInt>::ApplyTo(
-    const RnsBgvCiphertext<ModularInt>& ciphertext) const {
-  // First, key-switch the ciphertext as a generic RLWE ciphertext.
-  RLWE_ASSIGN_OR_RETURN(std::vector<RnsPolynomial<ModularInt>> components_new,
-                        ApplyToRlweCiphertext(ciphertext));
+absl::StatusOr<RnsPolynomial<ModularInt>>
+RnsGaloisKey<ModularInt>::PrecomputeRandomPad(
+    const std::vector<RnsPolynomial<ModularInt>>& ciphertext_pad_digits) const {
+  int k = gadget_->Dimension();
+  if (ciphertext_pad_digits.size() != k) {
+    return absl::InvalidArgumentError(
+        "`ciphertext_pad_digits` has incorrect size");
+  }
 
-  // Compute the error bound in the new ciphertext.
-  double error =
-      ciphertext.Error() +
-      ciphertext.ErrorParams()->BoundOnGadgetBasedKeySwitching(
-          /*num_components=*/1, gadget_->LogGadgetBase(), gadget_->Dimension());
-
-  return RnsBgvCiphertext<ModularInt>(std::move(components_new), moduli_,
-                                      /*power=*/1, error,
-                                      ciphertext.ErrorParams());
+  int log_n = key_as_[0].LogN();
+  RLWE_ASSIGN_OR_RETURN(auto c1_new, RnsPolynomial<ModularInt>::CreateZero(
+                                         log_n, moduli_, /*is_ntt=*/true));
+  for (int i = 0; i < ciphertext_pad_digits.size(); ++i) {
+    RLWE_RETURN_IF_ERROR(c1_new.FusedMulAddInPlace(ciphertext_pad_digits[i],
+                                                   key_as_[i], moduli_));
+  }
+  return c1_new;
 }
 
 template <typename ModularInt>
-absl::StatusOr<RnsBfvCiphertext<ModularInt>> RnsGaloisKey<ModularInt>::ApplyTo(
-    const RnsBfvCiphertext<ModularInt>& ciphertext) const {
-  // First, key-switch the ciphertext as a generic RLWE ciphertext.
-  RLWE_ASSIGN_OR_RETURN(std::vector<RnsPolynomial<ModularInt>> components_new,
-                        ApplyToRlweCiphertext(ciphertext));
+absl::StatusOr<RnsPolynomial<ModularInt>>
+RnsGaloisKey<ModularInt>::ApplyToRlweCiphertextWithRandomPad(
+    const RnsRlweCiphertext<ModularInt>& ciphertext,
+    const std::vector<RnsPolynomial<ModularInt>>& ciphertext_pad_digits,
+    const RnsPolynomial<ModularInt>& ciphertext_pad_new) const {
+  if (ciphertext.PowerOfS() != power_) {
+    return absl::InvalidArgumentError(
+        "`ciphertext` does not have a matching substitution power.");
+  }
+  if (ciphertext.NumModuli() != moduli_.size()) {
+    return absl::InvalidArgumentError(
+        "`ciphertext` does not have a matching RNS moduli set.");
+  }
+  if (ciphertext.Degree() != 1) {
+    return absl::InvalidArgumentError(
+        "Galois key can only apply to a ciphertext of degree 1.");
+  }
+  int k = gadget_->Dimension();
+  if (ciphertext_pad_digits.size() != k) {
+    return absl::InvalidArgumentError(
+        "`ciphertext_pad_digits` has incorrect size");
+  }
 
-  // Compute the error bound in the new ciphertext.
-  double error =
-      ciphertext.Error() +
-      ciphertext.ErrorParams()->BoundOnGadgetBasedKeySwitching(
-          /*num_components=*/1, gadget_->LogGadgetBase(), gadget_->Dimension());
+  RLWE_ASSIGN_OR_RETURN(RnsPolynomial<ModularInt> c0, ciphertext.Component(0));
+  RLWE_ASSIGN_OR_RETURN(
+      RnsPolynomial<ModularInt> c0_new,
+      RnsPolynomial<ModularInt>::CreateZero(c0.LogN(), moduli_,
+                                            /*is_ntt=*/true));
+  for (int i = 0; i < k; ++i) {
+    CHECK(ciphertext_pad_digits[i].IsNttForm())
+        << "`ciphertext_pad_digits` must be in NTT form";
+    RLWE_RETURN_IF_ERROR(c0_new.FusedMulAddInPlace(ciphertext_pad_digits[i],
+                                                   key_bs_[i], moduli_));
+  }
+  RLWE_RETURN_IF_ERROR(c0_new.AddInPlace(c0, moduli_));
 
-  return RnsBfvCiphertext<ModularInt>(
-      std::move(components_new), moduli_,
-      /*power=*/1, error, ciphertext.ErrorParams(), ciphertext.Context());
+  return c0_new;
 }
 
 template class RnsGaloisKey<MontgomeryInt<Uint16>>;
