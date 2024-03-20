@@ -1,0 +1,64 @@
+// Copyright 2024 Google LLC
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//      http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+// proto definitions of RNS variant of the RLWE library.
+
+syntax = "proto2";
+
+package rlwe;
+
+import "shell_encryption/serialization.proto";
+
+// RNS polynomial.
+message SerializedRnsPolynomial {
+  // The log (base 2) of the number of coefficients.
+  optional int32 log_n = 1;
+
+  // The coefficient vectors wrt RNS moduli.
+  repeated bytes coeff_vectors = 2;
+
+  // Is the polynomial in NTT form?
+  optional bool is_ntt = 3;
+}
+
+// RNS RLWE ciphertext.
+message SerializedRnsRlweCiphertext {
+  // The component polynomials composing the ciphertext.
+  repeated SerializedRnsPolynomial components = 1;
+
+  // The power of the secret key that the ciphertext is encrypted with.
+  optional int32 power_of_s = 2;
+
+  // A heuristic on the amount of error in the ciphertext.
+  optional double error = 3;
+}
+
+// RNS Galois key.
+message SerializedRnsGaloisKey {
+  // Reserve the tag 1 for the "a" components, in case a Galois key is derived
+  // from composition of Galois keys instead of generated from fresh.
+  reserved 1;
+
+  // The "b" components of the Galois key.
+  repeated SerializedRnsPolynomial key_bs = 2;
+
+  // The substitution power of the source secret key.
+  optional int32 power = 3;
+
+  // The PRNG seed used to compress the "a" components.
+  optional bytes prng_seed = 4;
+
+  // The type of the PRNG for sampling the "a" components.
+  optional PrngType prng_type = 5;
+}

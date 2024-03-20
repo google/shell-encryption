@@ -204,6 +204,23 @@ absl::StatusOr<RnsBfvCiphertext<ModularInt>> RnsBfvCiphertext<ModularInt>::Mul(
                                       this->ErrorParams(), this->context_);
 }
 
+template <typename ModularInt>
+absl::Status RnsBfvCiphertext<ModularInt>::AbsorbInPlaceSimple(
+    const RnsPolynomial<ModularInt>& plaintext) {
+  if (this->Level() + 1 != plaintext.NumModuli()) {
+    return absl::InvalidArgumentError("`plaintext` has a mismatched level.");
+  }
+  if (!plaintext.IsNttForm()) {
+    return absl::InvalidArgumentError("`plaintext` must be in NTT form.");
+  }
+
+  for (auto& ci : this->components()) {
+    RLWE_RETURN_IF_ERROR(ci.MulInPlace(plaintext, this->Moduli()));
+  }
+  this->error() *= this->ErrorParams()->B_plaintext();
+  return absl::OkStatus();
+}
+
 template class RnsBfvCiphertext<MontgomeryInt<Uint16>>;
 template class RnsBfvCiphertext<MontgomeryInt<Uint32>>;
 template class RnsBfvCiphertext<MontgomeryInt<Uint64>>;

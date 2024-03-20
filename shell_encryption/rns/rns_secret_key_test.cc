@@ -476,6 +476,16 @@ TYPED_TEST(RnsRlweSecretKeyTest, EncryptBfvFailsIfPrngIsNull) {
                        HasSubstr("`prng` must not be null")));
 }
 
+TYPED_TEST(RnsRlweSecretKeyTest, EncryptBfvFailsIfPrngPadIsNull) {
+  this->SetUpBfvContext();
+  ASSERT_OK_AND_ASSIGN(RnsRlweSecretKey<TypeParam> key, this->SampleKey());
+  EXPECT_THAT(key.EncryptBfv(/*messages=*/{}, this->coeff_encoder_.get(),
+                             this->error_params_.get(),
+                             /*prng=*/this->prng_.get(), /*prng_pad=*/nullptr),
+              StatusIs(absl::StatusCode::kInvalidArgument,
+                       HasSubstr("`prng_pad` must not be null")));
+}
+
 TYPED_TEST(RnsRlweSecretKeyTest, DecryptBfvFailsIfCiphertextPowerOfSIsNotOne) {
   this->SetUpBfvContext();
   ASSERT_OK_AND_ASSIGN(RnsRlweSecretKey<TypeParam> key, this->SampleKey());
@@ -578,6 +588,37 @@ TYPED_TEST(RnsRlweSecretKeyTest, EncryptBfvDecrypts) {
       RnsBfvCiphertext<TypeParam> ciphertext,
       key.EncryptBfv(messages, this->coeff_encoder_.get(),
                      this->error_params_.get(), this->prng_.get()));
+
+  ASSERT_OK_AND_ASSIGN(std::vector<Integer> dec_messages,
+                       key.DecryptBfv(ciphertext, this->coeff_encoder_.get()));
+  EXPECT_EQ(dec_messages, messages);
+}
+
+TYPED_TEST(RnsRlweSecretKeyTest, EncryptBfvWithGivenRandomPadDecrypts) {
+  using Integer = typename TypeParam::Int;
+  this->SetUpBfvContext();
+  ASSERT_OK_AND_ASSIGN(RnsRlweSecretKey<TypeParam> key, this->SampleKey());
+  int log_n = this->rns_context_->LogN();
+  Integer t = this->rns_context_->PlaintextModulus();
+  std::vector<Integer> messages = testing::SampleMessages(1 << log_n, t);
+
+  // Create a PRNG for sampling the random "a" polynomial in the ciphertext.
+  ASSERT_OK_AND_ASSIGN(auto prng_seed_pad, Prng::GenerateSeed());
+  ASSERT_OK_AND_ASSIGN(auto prng_pad, Prng::Create(prng_seed_pad));
+
+  ASSERT_OK_AND_ASSIGN(RnsBfvCiphertext<TypeParam> ciphertext,
+                       key.EncryptBfv(messages, this->coeff_encoder_.get(),
+                                      this->error_params_.get(),
+                                      this->prng_.get(), prng_pad.get()));
+
+  // Check that the "a" component in `ciphertext` is generated as expected.
+  ASSERT_OK_AND_ASSIGN(auto prng_pad_check, Prng::Create(prng_seed_pad));
+  ASSERT_OK_AND_ASSIGN(auto expected_pad,
+                       RnsPolynomial<TypeParam>::SampleUniform(
+                           log_n, prng_pad_check.get(), this->main_moduli_));
+  ASSERT_OK(expected_pad.NegateInPlace(this->main_moduli_));
+  ASSERT_OK_AND_ASSIGN(auto actual_pad, ciphertext.Component(1));
+  EXPECT_EQ(actual_pad, expected_pad);
 
   ASSERT_OK_AND_ASSIGN(std::vector<Integer> dec_messages,
                        key.DecryptBfv(ciphertext, this->coeff_encoder_.get()));

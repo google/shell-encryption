@@ -151,6 +151,18 @@ class RnsBfvCiphertext : public RnsRlweCiphertext<ModularInt> {
   // the messages are round(t / Q * `plaintext`) (mod t).
   absl::Status AbsorbInPlace(const RnsPolynomial<ModularInt>& plaintext);
 
+  // Homomorphically multiply `plaintext` to this ciphertext, assuming
+  // `plaintext` is a polynomial that encodes the plaintext messages without
+  // scaling, i.e. the messages are `plaintext` (mod t).
+  absl::Status AbsorbInPlaceSimple(const RnsPolynomial<ModularInt>& plaintext);
+
+  absl::StatusOr<RnsBfvCiphertext> AbsorbSimple(
+      const RnsPolynomial<ModularInt>& plaintext) const {
+    RnsBfvCiphertext out = *this;
+    RLWE_RETURN_IF_ERROR(out.AbsorbInPlaceSimple(plaintext));
+    return out;
+  }
+
   // Performs modulus reduction on BFV ciphertext. If `t` is the plaintext
   // modulus, and q_L is the last prime modulus in the moduli chain, then the
   // modulus reduced ciphertext is [round((q_L/Q)*c_i) mod (Q/q_L) : i = 0..d]

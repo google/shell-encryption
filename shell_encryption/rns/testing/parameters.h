@@ -19,6 +19,7 @@
 #include <vector>
 
 #include <gmock/gmock.h>
+#include <gtest/gtest.h>
 #include "absl/numeric/int128.h"
 #include "shell_encryption/integral_types.h"
 #include "shell_encryption/montgomery.h"
@@ -31,6 +32,7 @@ using ModularInt16 = MontgomeryInt<Uint16>;
 using ModularInt32 = MontgomeryInt<Uint32>;
 using ModularInt64 = MontgomeryInt<Uint64>;
 using ModularInt128 = MontgomeryInt<Uint128>;
+using ModularIntTypesForNegativeTests = ::testing::Types<ModularInt64>;
 
 // Constants used for test purpose only.
 constexpr Uint16 kModulus29Q0 = 12289;  // 14-bits

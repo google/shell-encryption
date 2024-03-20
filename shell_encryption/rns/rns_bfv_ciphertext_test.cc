@@ -279,6 +279,25 @@ TYPED_TEST(RnsBfvCiphertextTest, HomomorphicSubtractionPlaintext) {
 }
 
 TYPED_TEST(RnsBfvCiphertextTest, AbsorbFailsIfPlaintextIsNotNttForm) {
+  ASSERT_OK_AND_ASSIGN(auto zero, RnsPolynomial<TypeParam>::CreateZero(
+                                      this->rns_context_->LogN(),
+                                      this->main_moduli_, /*is_ntt=*/false));
+  RnsBfvCiphertext<TypeParam> ciphertext(
+      /*components=*/{zero, zero}, this->main_moduli_,
+      /*power_of_s=*/1, /*error=*/0, this->error_params_.get(),
+      this->rns_context_.get());
+
+  EXPECT_THAT(ciphertext.AbsorbInPlace(zero),
+              StatusIs(absl::StatusCode::kInvalidArgument,
+                       HasSubstr("`plaintext` must be in NTT form")));
+}
+
+TYPED_TEST(RnsBfvCiphertextTest, AbsorbSimpleFailsIfPlaintextLevelMismatches) {
+  // This test requires at least two prime moduli.
+  if (this->main_moduli_.size() < 2) {
+    GTEST_SKIP() << "Test requires at least two prime moduli.";
+  }
+
   ASSERT_OK_AND_ASSIGN(auto zero,
                        RnsPolynomial<TypeParam>::CreateZero(
                            this->rns_context_->LogN(), this->main_moduli_));
@@ -287,8 +306,25 @@ TYPED_TEST(RnsBfvCiphertextTest, AbsorbFailsIfPlaintextIsNotNttForm) {
       /*power_of_s=*/1, /*error=*/0, this->error_params_.get(),
       this->rns_context_.get());
 
-  ASSERT_OK(zero.ConvertToCoeffForm(this->main_moduli_));
-  EXPECT_THAT(ciphertext.AbsorbInPlace(zero),
+  ASSERT_OK_AND_ASSIGN(auto zero_at_level_zero,
+                       RnsPolynomial<TypeParam>::CreateZero(
+                           this->rns_context_->LogN(),
+                           absl::MakeSpan(this->main_moduli_).subspan(0, 1)));
+  EXPECT_THAT(ciphertext.AbsorbInPlaceSimple(zero_at_level_zero),
+              StatusIs(absl::StatusCode::kInvalidArgument,
+                       HasSubstr("`plaintext` has a mismatched level")));
+}
+
+TYPED_TEST(RnsBfvCiphertextTest, AbsorbSimpleFailsIfPlaintextIsNotNttForm) {
+  ASSERT_OK_AND_ASSIGN(auto zero, RnsPolynomial<TypeParam>::CreateZero(
+                                      this->rns_context_->LogN(),
+                                      this->main_moduli_, /*is_ntt=*/false));
+  RnsBfvCiphertext<TypeParam> ciphertext(
+      /*components=*/{zero, zero}, this->main_moduli_,
+      /*power_of_s=*/1, /*error=*/0, this->error_params_.get(),
+      this->rns_context_.get());
+
+  EXPECT_THAT(ciphertext.AbsorbInPlaceSimple(zero),
               StatusIs(absl::StatusCode::kInvalidArgument,
                        HasSubstr("`plaintext` must be in NTT form")));
 }
@@ -656,7 +692,7 @@ TYPED_TEST(RnsBfvCiphertextPackedTest, HomomorphicMulWithScalar) {
       main_modulus_bits += floor(log2(static_cast<double>(qi)));
     }
     if (main_modulus_bits < 2 * plaintext_bits) {
-      continue;
+      GTEST_SKIP() << "Insufficient modulus for multiplication.";
     }
 
     this->SetUpBfvRnsParameters(params);
@@ -696,7 +732,7 @@ TYPED_TEST(RnsBfvCiphertextPackedTest, HomomorphicMulWithPlaintext) {
       main_modulus_bits += floor(log2(static_cast<double>(qi)));
     }
     if (main_modulus_bits < 2 * plaintext_bits + params.log_n) {
-      continue;
+      GTEST_SKIP() << "Insufficient modulus for multiplication.";
     }
     this->SetUpBfvRnsParameters(params);
     ASSERT_OK_AND_ASSIGN(RnsRlweSecretKey<TypeParam> key, this->SampleKey());
@@ -724,6 +760,156 @@ TYPED_TEST(RnsBfvCiphertextPackedTest, HomomorphicMulWithPlaintext) {
   }
 }
 
+// Tests `AbsorbSimple` which multiplies with a plaintext that encodes the
+// messages without scaling them up.
+TYPED_TEST(RnsBfvCiphertextPackedTest, HomomorphicMulWithUnscaledPlaintext) {
+  using Integer = typename TypeParam::Int;
+
+  for (auto const& params :
+       testing::GetBfvParametersForFiniteFieldEncoding<TypeParam>()) {
+    int plaintext_bits = ceil(log2(static_cast<double>(params.t)));
+    int main_modulus_bits = 0;
+    for (auto qi : params.qs) {
+      main_modulus_bits += floor(log2(static_cast<double>(qi)));
+    }
+    if (main_modulus_bits < 2 * plaintext_bits + params.log_n) {
+      GTEST_SKIP() << "Insufficient modulus for multiplication.";
+    }
+    this->SetUpBfvRnsParameters(params);
+    ASSERT_OK_AND_ASSIGN(RnsRlweSecretKey<TypeParam> key, this->SampleKey());
+
+    int log_n = this->rns_context_->LogN();
+    Integer t = this->rns_context_->PlaintextModulus();
+    const FiniteFieldEncoder<TypeParam>* encoder = this->encoder_.get();
+
+    std::vector<Integer> messages0 = testing::SampleMessages(1 << log_n, t);
+    std::vector<Integer> messages1 = testing::SampleMessages(1 << log_n, t);
+    ASSERT_OK_AND_ASSIGN(
+        RnsBfvCiphertext<TypeParam> ciphertext,
+        key.template EncryptBfv<FiniteFieldEncoder<TypeParam>>(
+            messages0, encoder, this->error_params_.get(), this->prng_.get()));
+    ASSERT_OK_AND_ASSIGN(
+        auto plaintext,
+        encoder->EncodeBfv(messages1, this->main_moduli_, /*is_scaled=*/false));
+
+    ASSERT_OK_AND_ASSIGN(auto ciphertext_product,
+                         ciphertext.AbsorbSimple(plaintext));
+    ASSERT_OK_AND_ASSIGN(std::vector<Integer> dec_messages,
+                         key.template DecryptBfv<FiniteFieldEncoder<TypeParam>>(
+                             ciphertext_product, encoder));
+    for (int i = 0; i < (1 << log_n); ++i) {
+      EXPECT_EQ(dec_messages[i], (messages0[i] * messages1[i]) % t);
+    }
+  }
+}
+
+TYPED_TEST(RnsBfvCiphertextPackedTest, HomomorphicFusedAbsorbAdd) {
+  using Integer = typename TypeParam::Int;
+
+  for (auto const& params :
+       testing::GetBfvParametersForFiniteFieldEncoding<TypeParam>()) {
+    int plaintext_bits = ceil(log2(static_cast<double>(params.t)));
+    int main_modulus_bits = 0;
+    for (auto qi : params.qs) {
+      main_modulus_bits += floor(log2(static_cast<double>(qi)));
+    }
+    if (main_modulus_bits < 2 * plaintext_bits + params.log_n) {
+      GTEST_SKIP() << "Insufficient modulus for multiplication.";
+    }
+    this->SetUpBfvRnsParameters(params);
+    ASSERT_OK_AND_ASSIGN(RnsRlweSecretKey<TypeParam> key, this->SampleKey());
+
+    int log_n = this->rns_context_->LogN();
+    Integer t = this->rns_context_->PlaintextModulus();
+    const FiniteFieldEncoder<TypeParam>* encoder = this->encoder_.get();
+
+    std::vector<Integer> messages0 = testing::SampleMessages(1 << log_n, t);
+    std::vector<Integer> messages1 = testing::SampleMessages(1 << log_n, t);
+    std::vector<Integer> messages2 =
+        testing::SampleMessages<Integer>(1 << log_n, 2);
+    ASSERT_OK_AND_ASSIGN(
+        RnsBfvCiphertext<TypeParam> ciphertext0,
+        key.template EncryptBfv<FiniteFieldEncoder<TypeParam>>(
+            messages0, encoder, this->error_params_.get(), this->prng_.get()));
+    ASSERT_OK_AND_ASSIGN(
+        RnsBfvCiphertext<TypeParam> ciphertext1,
+        key.template EncryptBfv<FiniteFieldEncoder<TypeParam>>(
+            messages1, encoder, this->error_params_.get(), this->prng_.get()));
+    ASSERT_OK_AND_ASSIGN(
+        auto plaintext,
+        encoder->EncodeBfv(messages2, this->main_moduli_, /*is_scaled=*/false));
+
+    ASSERT_OK(ciphertext0.FusedAbsorbAddInPlace(ciphertext1, plaintext));
+    ASSERT_OK_AND_ASSIGN(std::vector<Integer> dec_messages,
+                         key.template DecryptBfv<FiniteFieldEncoder<TypeParam>>(
+                             ciphertext0, encoder));
+    for (int i = 0; i < (1 << log_n); ++i) {
+      Integer expected = (messages0[i] + messages1[i] * messages2[i]) % t;
+      EXPECT_EQ(dec_messages[i], expected);
+    }
+  }
+}
+
+TYPED_TEST(RnsBfvCiphertextPackedTest, HomomorphicFusedAbsorbAddWithoutPad) {
+  using Integer = typename TypeParam::Int;
+
+  for (auto const& params :
+       testing::GetBfvParametersForFiniteFieldEncoding<TypeParam>()) {
+    int plaintext_bits = ceil(log2(static_cast<double>(params.t)));
+    int main_modulus_bits = 0;
+    for (auto qi : params.qs) {
+      main_modulus_bits += floor(log2(static_cast<double>(qi)));
+    }
+    if (main_modulus_bits < 2 * plaintext_bits + params.log_n) {
+      GTEST_SKIP() << "Insufficient modulus for multiplication.";
+    }
+    this->SetUpBfvRnsParameters(params);
+    ASSERT_OK_AND_ASSIGN(RnsRlweSecretKey<TypeParam> key, this->SampleKey());
+
+    int log_n = this->rns_context_->LogN();
+    Integer t = this->rns_context_->PlaintextModulus();
+    const FiniteFieldEncoder<TypeParam>* encoder = this->encoder_.get();
+
+    std::vector<Integer> messages0 = testing::SampleMessages(1 << log_n, t);
+    std::vector<Integer> messages1 = testing::SampleMessages(1 << log_n, t);
+    std::vector<Integer> messages2 =
+        testing::SampleMessages<Integer>(1 << log_n, 2);
+    ASSERT_OK_AND_ASSIGN(
+        RnsBfvCiphertext<TypeParam> ciphertext0,
+        key.template EncryptBfv<FiniteFieldEncoder<TypeParam>>(
+            messages0, encoder, this->error_params_.get(), this->prng_.get()));
+    ASSERT_OK_AND_ASSIGN(
+        RnsBfvCiphertext<TypeParam> ciphertext1,
+        key.template EncryptBfv<FiniteFieldEncoder<TypeParam>>(
+            messages1, encoder, this->error_params_.get(), this->prng_.get()));
+    ASSERT_OK_AND_ASSIGN(
+        auto plaintext,
+        encoder->EncodeBfv(messages2, this->main_moduli_, /*is_scaled=*/false));
+
+    // Precompute the "a" part of the resulting ciphertext.
+    ASSERT_OK_AND_ASSIGN(RnsPolynomial<TypeParam> pad0,
+                         ciphertext0.Component(1));
+    ASSERT_OK_AND_ASSIGN(RnsPolynomial<TypeParam> pad1,
+                         ciphertext1.Component(1));
+    ASSERT_OK(pad0.FusedMulAddInPlace(pad1, plaintext, this->main_moduli_));
+
+    // Fused absorb add without updating the "a" part.
+    ASSERT_OK(
+        ciphertext0.FusedAbsorbAddInPlaceWithoutPad(ciphertext1, plaintext));
+
+    // Now update the "a" part.
+    ASSERT_OK(ciphertext0.SetPadComponent(std::move(pad0)));
+
+    ASSERT_OK_AND_ASSIGN(std::vector<Integer> dec_messages,
+                         key.template DecryptBfv<FiniteFieldEncoder<TypeParam>>(
+                             ciphertext0, encoder));
+    for (int i = 0; i < (1 << log_n); ++i) {
+      Integer expected = (messages0[i] + messages1[i] * messages2[i]) % t;
+      EXPECT_EQ(dec_messages[i], expected);
+    }
+  }
+}
+
 TYPED_TEST(RnsBfvCiphertextPackedTest, HomomorphicMulWithCiphertext) {
   using Integer = typename TypeParam::Int;
 
@@ -735,7 +921,7 @@ TYPED_TEST(RnsBfvCiphertextPackedTest, HomomorphicMulWithCiphertext) {
       main_modulus_bits += floor(log2(static_cast<double>(qi)));
     }
     if (main_modulus_bits < 2 * plaintext_bits + params.log_n) {
-      continue;
+      GTEST_SKIP() << "Insufficient modulus for multiplication.";
     }
     this->SetUpBfvRnsParameters(params);
     ASSERT_OK_AND_ASSIGN(RnsRlweSecretKey<TypeParam> key, this->SampleKey());

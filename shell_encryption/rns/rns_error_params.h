@@ -92,6 +92,7 @@ class RnsErrorParams {
   // Accessors for frequently used error bound constants.
   double B_plaintext() const { return b_plaintext_; }
   double B_secretkey_encryption() const { return b_secretkey_encryption_; }
+  double B_publickey_encryption() const { return b_publickey_encryption_; }
   double B_scale() const { return b_scale_; }
 
  private:
@@ -113,6 +114,7 @@ class RnsErrorParams {
     int dimension = 1 << log_n;
     b_plaintext_ = B_plaintext(dimension);
     b_secretkey_encryption_ = B_secretkey_encryption(dimension, sigma);
+    b_publickey_encryption_ = B_publickey_encryption(dimension, sigma);
     b_scale_ = B_scale(dimension);
   }
 
@@ -139,6 +141,20 @@ class RnsErrorParams {
     return ExportDoubleT() * sqrt(dimension) * (sqrt(3.0) + 6.0 * sigma);
   }
 
+  // This represents the "size" of a freshly encrypted ciphertext using a public
+  // key, where the public key's error term, the public-key encryption's random
+  // element and error terms are all sampled from a centered binomial
+  // distribution with the specified standard deviation `sigma`. The error in a
+  // fresh public-key encryption is t * (v * e + e' + s * e''), where s, v, e,
+  // e', e'' are all sampled from the same error distribution of variance
+  // sigma^2. In the NTT domain, the norm of this error term is bounded by t *
+  // (72 * N * sigma^2 + 6 * sqrt(N) * sigma). Then adding the bound on the
+  // message t * sqrt(3 * N) and we get the bound on the error and message.
+  double B_publickey_encryption(int dimension, double sigma) const {
+    return ExportDoubleT() * (sqrt(dimension) * (6 * sigma + sqrt(3)) +
+                              72 * dimension * sigma * sigma);
+  }
+
   // When modulus switching a ciphertext from a modulus q to a smaller modulus
   // p, the polynomial is scaled by (p / q) and a small rounding polynomial is
   // added so that the result is the closest integer polynomial with c' = c mod
@@ -163,6 +179,7 @@ class RnsErrorParams {
 
   double b_plaintext_;
   double b_secretkey_encryption_;
+  double b_publickey_encryption_;
   double b_scale_;
 };
 
