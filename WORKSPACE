@@ -57,10 +57,10 @@ http_archive(
 # abseil-cpp
 http_archive(
     name = "com_google_absl",
-    sha256 = "987ce98f02eefbaf930d6e38ab16aa05737234d7afbab2d5c4ea7adbe50c28ed",
-    strip_prefix = "abseil-cpp-20230802.1",
+    sha256 = "3c743204df78366ad2eaf236d6631d83f6bc928d1705dd0000b872e53b73dc6a",
+    strip_prefix = "abseil-cpp-20240116.1",
     urls = [
-         "https://github.com/abseil/abseil-cpp/archive/refs/tags/20230802.1.tar.gz",
+         "https://github.com/abseil/abseil-cpp/releases/download/20240116.1/abseil-cpp-20240116.1.tar.gz",
     ],
 )
 
