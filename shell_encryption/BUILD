@@ -18,12 +18,6 @@ load("@rules_proto//proto:defs.bzl", "proto_library")
 
 package(default_visibility = ["//visibility:public"])
 
-license(
-    name = "package_license",
-    package_name = "rlwe",
-    license_kinds = ["@rules_license//licenses/spdx:Apache-2.0"],
-)
-
 licenses(["notice"])
 
 exports_files(["LICENSE"])
