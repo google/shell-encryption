@@ -269,7 +269,7 @@ TYPED_TEST(RnsBgvCiphertextTest, ModReducedCiphertextDecrypts) {
   if (this->main_moduli_.size() < 2) {
     // There is only one prime modulus in the moduli chain, so we cannot perform
     // modulus reduction further.
-    return;
+    GTEST_SKIP() << "Insufficient number of prime moduli for ModReduce.";
   }
 
   ASSERT_OK_AND_ASSIGN(RnsRlweSecretKey<TypeParam> key, this->SampleKey());
@@ -649,7 +649,7 @@ TYPED_TEST(RnsBgvCiphertextPackedTest, HomomorphicMulWithCiphertext) {
       // The test parameters are not suitable for homomorphic multiplication as
       // the error in the product ciphertext is expected to be larger than the
       // ciphertext modulus.
-      return;
+      continue;
     }
 
     ASSERT_OK_AND_ASSIGN(RnsRlweSecretKey<TypeParam> key, this->SampleKey());
