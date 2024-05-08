@@ -33,6 +33,7 @@
 #include "shell_encryption/prng/single_thread_chacha_prng.h"
 #include "shell_encryption/prng/single_thread_hkdf_prng.h"
 #include "shell_encryption/rns/error_distribution.h"
+#include "shell_encryption/rns/lazy_rns_polynomial.h"
 #include "shell_encryption/rns/rns_bfv_ciphertext.h"
 #include "shell_encryption/rns/rns_bgv_ciphertext.h"
 #include "shell_encryption/rns/rns_ciphertext.h"
@@ -329,19 +330,19 @@ RnsGaloisKey<ModularInt>::ApplyToRlweCiphertextWithRandomPad(
         "`ciphertext_pad_digits` has incorrect size");
   }
 
-  RLWE_ASSIGN_OR_RETURN(RnsPolynomial<ModularInt> c0, ciphertext.Component(0));
   RLWE_ASSIGN_OR_RETURN(
-      RnsPolynomial<ModularInt> c0_new,
-      RnsPolynomial<ModularInt>::CreateZero(c0.LogN(), moduli_,
-                                            /*is_ntt=*/true));
+      auto lazy_c0_new,
+      LazyRnsPolynomial<ModularInt>::CreateZero(key_bs_[0].LogN(), moduli_));
   for (int i = 0; i < k; ++i) {
     CHECK(ciphertext_pad_digits[i].IsNttForm())
         << "`ciphertext_pad_digits` must be in NTT form";
-    RLWE_RETURN_IF_ERROR(c0_new.FusedMulAddInPlace(ciphertext_pad_digits[i],
-                                                   key_bs_[i], moduli_));
+    RLWE_RETURN_IF_ERROR(lazy_c0_new.FusedMulAddInPlace(
+        ciphertext_pad_digits[i], key_bs_[i], moduli_));
   }
+  RLWE_ASSIGN_OR_RETURN(RnsPolynomial<ModularInt> c0_new,
+                        lazy_c0_new.Export(moduli_));
+  RLWE_ASSIGN_OR_RETURN(RnsPolynomial<ModularInt> c0, ciphertext.Component(0));
   RLWE_RETURN_IF_ERROR(c0_new.AddInPlace(c0, moduli_));
-
   return c0_new;
 }
 

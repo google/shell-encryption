@@ -17,7 +17,12 @@
 #ifndef RLWE_TESTING_STATUS_MATCHERS_H_
 #define RLWE_TESTING_STATUS_MATCHERS_H_
 
+#include <ostream>
+#include <string>
+#include <utility>
+
 #include <gmock/gmock.h>
+#include <gtest/gtest.h>
 #include "absl/status/status.h"
 #include "shell_encryption/statusor.h"
 
@@ -106,6 +111,12 @@ inline internal::StatusIsPoly StatusIs(
   return internal::StatusIsPoly(
       std::forward<::testing::Matcher<absl::StatusCode>>(code),
       std::forward<::testing::Matcher<const std::string&>>(message));
+}
+
+inline internal::StatusIsPoly StatusIs(
+    ::testing::Matcher<absl::StatusCode>&& code) {
+  return internal::StatusIsPoly(
+      std::forward<::testing::Matcher<absl::StatusCode>>(code), ::testing::_);
 }
 
 }  // namespace testing
