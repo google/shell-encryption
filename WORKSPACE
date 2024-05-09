@@ -87,3 +87,14 @@ http_archive(
     sha256 = "34af2f15cf7367513b352bdcd2493ab14ce43692d2dcd9dfc499492966c64dcf",
     strip_prefix = "gflags-2.2.2",
 )
+
+# Highway for SIMD operations.
+# https://github.com/google/highway
+http_archive(
+    name = "com_github_google_highway",
+    sha256 = "e9a9e1d2c7a607d4bce48b75f83eb25a8e802e6fe065bcd5dd770b79034ac6b9",
+    strip_prefix = "highway-3af6ba57bf82c861870f92f0483149439007d652",
+    urls = [
+        "https://github.com/google/highway/archive/3af6ba57bf82c861870f92f0483149439007d652.zip",
+    ],
+)

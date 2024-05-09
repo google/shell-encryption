@@ -314,6 +314,7 @@ cc_library(
     srcs = ["rns_ciphertext.cc"],
     hdrs = ["rns_ciphertext.h"],
     deps = [
+        ":lazy_rns_polynomial",
         ":rns_error_params",
         ":rns_polynomial",
         ":serialization_cc_proto",
@@ -724,6 +725,7 @@ cc_library(
     hdrs = ["rns_galois_key.h"],
     deps = [
         ":error_distribution",
+        ":lazy_rns_polynomial",
         ":rns_bfv_ciphertext",
         ":rns_bgv_ciphertext",
         ":rns_ciphertext",
@@ -820,6 +822,69 @@ cc_test(
         "//shell_encryption/rns/testing:parameters",
         "//shell_encryption/rns/testing:testing_utils",
         "//shell_encryption/testing:matchers",
+        "//shell_encryption/testing:status_testing",
+        "//shell_encryption/testing:testing_prng",
+        "@com_github_google_googletest//:gtest_main",
+        "@com_google_absl//absl/log:check",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/strings",
+    ],
+)
+
+# Highway-based polynomial multiplication.
+cc_library(
+    name = "rns_polynomial_hwy",
+    srcs = ["rns_polynomial_hwy.cc"],
+    hdrs = ["rns_polynomial_hwy.h"],
+    deps = [
+        "//shell_encryption:integral_types",
+        "//shell_encryption:montgomery",
+        "@com_github_google_highway//:hwy",
+        "@com_google_absl//absl/base:core_headers",
+        "@com_google_absl//absl/numeric:int128",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/types:span",
+    ],
+)
+
+# Lazy RNS polynomial.
+cc_library(
+    name = "lazy_rns_polynomial",
+    srcs = ["lazy_rns_polynomial.cc"],
+    hdrs = ["lazy_rns_polynomial.h"],
+    deps = [
+        ":rns_modulus",
+        ":rns_polynomial",
+        ":rns_polynomial_hwy",
+        "//shell_encryption:integral_types",
+        "//shell_encryption:montgomery",
+        "//shell_encryption:statusor_fork",
+        "@com_github_google_highway//:hwy",
+        "@com_google_absl//absl/numeric:int128",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/types:span",
+    ],
+)
+
+cc_test(
+    name = "lazy_rns_polynomial_test",
+    srcs = ["lazy_rns_polynomial_test.cc"],
+    deps = [
+        ":lazy_rns_polynomial",
+        ":rns_context",
+        ":rns_modulus",
+        ":rns_polynomial",
+        "//shell_encryption:integral_types",
+        "//shell_encryption:montgomery",
+        "//shell_encryption:polynomial",
+        "//shell_encryption:statusor_fork",
+        "//shell_encryption/rns/testing:parameters",
+        "//shell_encryption/rns/testing:testing_utils",
+        "//shell_encryption/testing:matchers",
+        "//shell_encryption/testing:parameters",
         "//shell_encryption/testing:status_testing",
         "//shell_encryption/testing:testing_prng",
         "@com_github_google_googletest//:gtest_main",
