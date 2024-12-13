@@ -81,6 +81,7 @@ cc_library(
         "//shell_encryption:statusor_fork",
         "@com_github_google_googletest//:gtest",
         "@com_google_absl//absl/status",
+        "@com_google_protobuf//:differencer",
     ],
 )
 
@@ -95,6 +96,7 @@ cc_library(
         "//shell_encryption:statusor_fork",
         "@com_github_google_googletest//:gtest",
         "@com_google_absl//absl/status",
+        "@com_google_protobuf//:differencer",
     ],
 )
 

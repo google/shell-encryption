@@ -1,0 +1,14 @@
+module(
+    name = "shell-encryption",
+)
+
+bazel_dep(name = "tink_cc", version = "2.1.3", repo_name = "com_github_tink_crypto_tink_cc")
+bazel_dep(name = "rules_cc", version = "0.1.0")
+bazel_dep(name = "rules_proto", version = "7.0.2")
+bazel_dep(name = "protobuf", version = "27.3", repo_name = "com_google_protobuf")
+bazel_dep(name = "googletest", version = "1.15.2", repo_name = "com_github_google_googletest")
+bazel_dep(name = "abseil-cpp", version = "20240116.2", repo_name = "com_google_absl")
+bazel_dep(name = "boringssl", version = "0.20241209.0")
+bazel_dep(name = "glog", version = "0.5.0", repo_name = "com_github_google_glog")
+bazel_dep(name = "rules_license", version = "1.0.0")
+bazel_dep(name = "highway", version = "1.2.0", repo_name = "com_github_google_highway")
