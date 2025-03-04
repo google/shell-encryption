@@ -153,6 +153,9 @@ TYPED_TEST(RnsCiphertextTest, AddFailsIfLevelMismatch) {
   EXPECT_THAT(ct0.AddInPlace(ct1),
               StatusIs(absl::StatusCode::kInvalidArgument,
                        HasSubstr("`that` has a mismatched level")));
+  EXPECT_THAT(ct0.AddInPlaceWithoutPad(ct1),
+              StatusIs(absl::StatusCode::kInvalidArgument,
+                       HasSubstr("`that` has a mismatched level")));
 }
 
 TYPED_TEST(RnsCiphertextTest, AddFailsIfPowerOfSMismatch) {
@@ -174,6 +177,10 @@ TYPED_TEST(RnsCiphertextTest, AddFailsIfPowerOfSMismatch) {
 
   EXPECT_THAT(
       ct0.AddInPlace(ct1),
+      StatusIs(absl::StatusCode::kInvalidArgument,
+               HasSubstr("`that` is encrypted with a different key power")));
+  EXPECT_THAT(
+      ct0.AddInPlaceWithoutPad(ct1),
       StatusIs(absl::StatusCode::kInvalidArgument,
                HasSubstr("`that` is encrypted with a different key power")));
 }
@@ -257,6 +264,9 @@ TYPED_TEST(RnsCiphertextTest, SubFailsIfLevelMismatch) {
   EXPECT_THAT(ct0.SubInPlace(ct1),
               StatusIs(absl::StatusCode::kInvalidArgument,
                        HasSubstr("`that` has a mismatched level")));
+  EXPECT_THAT(ct0.SubInPlaceWithoutPad(ct1),
+              StatusIs(absl::StatusCode::kInvalidArgument,
+                       HasSubstr("`that` has a mismatched level")));
 }
 
 TYPED_TEST(RnsCiphertextTest, SubPlaintextFailsIfLevelMismatch) {
@@ -307,6 +317,10 @@ TYPED_TEST(RnsCiphertextTest, SubFailsIfPowerOfSMismatch) {
 
   EXPECT_THAT(
       ct0.SubInPlace(ct1),
+      StatusIs(absl::StatusCode::kInvalidArgument,
+               HasSubstr("`that` is encrypted with a different key power")));
+  EXPECT_THAT(
+      ct0.SubInPlaceWithoutPad(ct1),
       StatusIs(absl::StatusCode::kInvalidArgument,
                HasSubstr("`that` is encrypted with a different key power")));
 }

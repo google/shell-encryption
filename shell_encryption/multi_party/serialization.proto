@@ -1,0 +1,44 @@
+// Copyright 2025 Google LLC
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//      http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+syntax = "proto2";
+
+package rlwe;
+
+import "shell_encryption/serialization.proto";
+import "shell_encryption/rns/serialization.proto";
+
+// Public parameter.
+message SerializedPublicParameter {
+  // Seed used to generate the random polynomial "a" in the public parameter.
+  optional bytes prng_seed = 1;
+
+  // Type of PRNG used to generate the random polynomial "a"
+  optional PrngType prng_type = 2;
+
+  // The variance of error distribution for generating the public key.
+  optional int32 error_variance = 3;
+}
+
+// Public key share.
+message SerializedPublicKeyShare {
+  // The "b" components of the public key share.
+  optional SerializedRnsPolynomial key_b = 1;
+}
+
+// Public key.
+message SerializedPublicKey {
+  // The "b" components of the public key.
+  optional SerializedRnsPolynomial key_b = 1;
+}

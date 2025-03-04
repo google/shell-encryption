@@ -61,6 +61,7 @@ cc_library(
         "//shell_encryption:montgomery",
         "//shell_encryption:ntt_parameters",
         "@com_google_absl//absl/memory",
+        "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/types:span",
     ],
 )
@@ -183,6 +184,7 @@ cc_library(
     srcs = ["coefficient_encoder.cc"],
     hdrs = ["coefficient_encoder.h"],
     deps = [
+        ":crt_interpolation",
         ":error_correction",
         ":rns_context",
         ":rns_integer",
@@ -205,11 +207,10 @@ cc_test(
     srcs = ["coefficient_encoder_test.cc"],
     deps = [
         ":coefficient_encoder",
+        ":crt_interpolation",
         ":rns_context",
-        ":rns_integer",
         ":rns_modulus",
         ":rns_polynomial",
-        "//shell_encryption:montgomery",
         "//shell_encryption/rns/testing:parameters",
         "//shell_encryption/rns/testing:testing_utils",
         "//shell_encryption/testing:matchers",
@@ -218,6 +219,28 @@ cc_test(
         "@com_github_google_googletest//:gtest_main",
         "@com_google_absl//absl/log:check",
         "@com_google_absl//absl/status",
+        "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/types:span",
+    ],
+)
+
+# Pack (and unpack) small integers into fewer large integers.
+cc_library(
+    name = "message_packing",
+    hdrs = ["message_packing.h"],
+    deps = [
+        "//shell_encryption:int256",
+        "//shell_encryption:integral_types",
+    ],
+)
+
+cc_test(
+    name = "message_packing_test",
+    srcs = ["message_packing_test.cc"],
+    deps = [
+        ":message_packing",
+        "//shell_encryption:int256",
+        "@com_github_google_googletest//:gtest_main",
         "@com_google_absl//absl/types:span",
     ],
 )
@@ -253,6 +276,53 @@ cc_test(
     deps = [
         ":crt_interpolation",
         ":finite_field_encoder",
+        ":rns_context",
+        ":rns_integer",
+        ":rns_modulus",
+        ":rns_polynomial",
+        "//shell_encryption:montgomery",
+        "//shell_encryption/rns/testing:parameters",
+        "//shell_encryption/rns/testing:testing_utils",
+        "//shell_encryption/testing:matchers",
+        "//shell_encryption/testing:status_testing",
+        "@com_github_google_googletest//:gtest_main",
+        "@com_google_absl//absl/log:check",
+        "@com_google_absl//absl/random",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/types:span",
+    ],
+)
+
+cc_library(
+    name = "approximate_encoder",
+    srcs = ["approximate_encoder.cc"],
+    hdrs = ["approximate_encoder.h"],
+    deps = [
+        ":coefficient_encoder",
+        ":crt_interpolation",
+        ":rns_context",
+        ":rns_integer",
+        ":rns_modulus",
+        ":rns_polynomial",
+        "//shell_encryption:dft_transformations",
+        "//shell_encryption:int256",
+        "//shell_encryption:integral_types",
+        "//shell_encryption:montgomery",
+        "//shell_encryption:ntt_parameters",
+        "//shell_encryption:statusor_fork",
+        "@com_google_absl//absl/numeric:int128",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/types:span",
+    ],
+)
+
+cc_test(
+    name = "approximate_encoder_test",
+    srcs = ["approximate_encoder_test.cc"],
+    deps = [
+        ":approximate_encoder",
         ":rns_context",
         ":rns_integer",
         ":rns_modulus",

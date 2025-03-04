@@ -45,6 +45,9 @@ class uint256 {
   constexpr uint256(unsigned __int128 bottom);
 #endif
 
+  explicit uint256(float v);
+  explicit uint256(double v);
+
   // Conversion operators to other arithmetic types
   constexpr explicit operator bool() const;
   constexpr explicit operator char() const;
@@ -107,7 +110,8 @@ class uint256 {
 #endif
 
   // We add "std::" to avoid including all of port.h.
-  friend std::ostream& operator<<(std::ostream& o, const uint256& b);
+  friend std::ostream& operator<<(std::ostream& o,
+                                                          const uint256& b);
 
  private:
   static void DivModImpl(uint256 dividend, uint256 divisor,
@@ -132,8 +136,6 @@ class uint256 {
 
   // Not implemented, just declared for catching automatic type conversions.
   uint256(Uint16);
-  uint256(float v);
-  uint256(double v);
 };
 
 constexpr uint256 Uint256Max() {
@@ -411,11 +413,11 @@ LOGIC256(^)
 
 #undef LOGIC256
 
-#define LOGICASSIGN256(op)                                 \
-  inline uint256& uint256::operator op(const uint256& b) { \
-    hi_ op b.hi_;                                          \
-    lo_ op b.lo_;                                          \
-    return *this;                                          \
+#define LOGICASSIGN256(op)                                  \
+  inline uint256& uint256::operator op(const uint256 & b) { \
+    hi_ op b.hi_;                                           \
+    lo_ op b.lo_;                                           \
+    return *this;                                           \
   }
 
 LOGICASSIGN256(|=)

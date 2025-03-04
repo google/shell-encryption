@@ -109,6 +109,15 @@ class RnsGaloisKey {
                                gadget, prng_pad_seed, prng_type);
   }
 
+  // Creates the random polynomials `as` of the composition of gk0 and gk1.
+  // We have as[i] = <g^-1(gk1_as[i]), gk0_as>
+  //               = <gk1_as_digits[i], gk0_as> (mod Q)
+  static absl::StatusOr<std::vector<RnsPolynomial<ModularInt>>>
+  CreatePadOfComposedKey(
+      const std::vector<RnsPolynomial<ModularInt>>& gk0_as,
+      const std::vector<std::vector<RnsPolynomial<ModularInt>>>& gk1_as_digits,
+      absl::Span<const PrimeModulus<ModularInt>* const> moduli);
+
   // Creates a Galois key from the "a" and "b" polynomials composing the key.
   static absl::StatusOr<RnsGaloisKey> CreateFromKeyComponents(
       std::vector<RnsPolynomial<ModularInt>> key_as,
@@ -200,6 +209,17 @@ class RnsGaloisKey {
         /*power_of_s=*/1, error, ciphertext.ErrorParams(),
         ciphertext.Context());
   }
+
+  // Returns a galois key that's the composition of this and the other key
+  absl::StatusOr<RnsGaloisKey> Compose(const RnsGaloisKey& other_key) const;
+
+  // Returns a galois key that's the composition of this and the other key,
+  // where the gadget decomposition of the random polynomials of the other key
+  // and the random polynomials of the composed key are given.
+  absl::StatusOr<RnsGaloisKey> ComposeWithPads(
+      const RnsGaloisKey& other_key,
+      const std::vector<std::vector<RnsPolynomial<ModularInt>>>& other_a_digits,
+      std::vector<RnsPolynomial<ModularInt>> composed_key_as) const;
 
   // Accessors to the key components.
   const std::vector<RnsPolynomial<ModularInt>>& GetKeyA() const {

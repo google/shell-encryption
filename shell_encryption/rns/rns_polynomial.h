@@ -54,6 +54,12 @@ class RnsPolynomial {
   static absl::StatusOr<RnsPolynomial> Create(
       std::vector<std::vector<ModularInt>> coeff_vectors, bool is_ntt = true);
 
+  // Creates an empty polynomial with empty coefficient vectors. This empty
+  // polynomial should only be used for placeholder purposes (e.g. initialize a
+  // return argument) and is not meant to be operated on. Note: this empty
+  // polynomial has `log_n_` = 0 and thus `NumCoeffs()` = 1.
+  static RnsPolynomial CreateEmpty();
+
   // Creates a polynomial 0 wrt the given moduli representing q_i's.
   static absl::StatusOr<RnsPolynomial> CreateZero(
       int log_n, absl::Span<const PrimeModulus<ModularInt>* const> moduli,

@@ -135,6 +135,49 @@ absl::StatusOr<RnsPolynomial<ModularInt>> SampleDiscreteGaussian(
                                            /*is_ntt=*/false);
 }
 
+// Samples a RNS polynomial with independent discrete Gaussian coefficients,
+// sampled from the base Gaussian distribution defined in `dg_sampler`.
+template <typename ModularInt>
+absl::StatusOr<RnsPolynomial<ModularInt>> SampleDiscreteGaussian(
+    int log_n, absl::Span<const PrimeModulus<ModularInt>* const> moduli,
+    const DiscreteGaussianSampler<typename ModularInt::Int>* dg_sampler,
+    SecurePrng* prng) {
+  using Integer = typename ModularInt::Int;
+  if (log_n <= 0) {
+    return absl::InvalidArgumentError("`log_n` must be positive.");
+  }
+  if (moduli.empty()) {
+    return absl::InvalidArgumentError("`moduli` must not be empty.");
+  }
+  if (dg_sampler == nullptr) {
+    return absl::InvalidArgumentError("`dg_sampler` must not be null.");
+  }
+
+  int num_coeffs = 1 << log_n;
+  int num_moduli = moduli.size();
+  std::vector<std::vector<ModularInt>> coeff_vectors(num_moduli);
+  for (int j = 0; j < num_moduli; ++j) {
+    coeff_vectors[j].reserve(num_coeffs);
+  }
+  for (int i = 0; i < num_coeffs; ++i) {
+    RLWE_ASSIGN_OR_RETURN(Integer coeff, dg_sampler->Sample(*prng));
+    bool is_negative =
+        coeff > DiscreteGaussianSampler<Integer>::kNegativeThreshold;
+
+    for (int j = 0; j < num_moduli; ++j) {
+      auto qj = moduli[j]->Modulus();
+      Integer coeff_mod_qj =
+          is_negative ? qj - (static_cast<Integer>(-coeff) % qj) : coeff;
+      RLWE_ASSIGN_OR_RETURN(
+          ModularInt coeff_qj,
+          ModularInt::ImportInt(coeff_mod_qj, moduli[j]->ModParams()));
+      coeff_vectors[j].push_back(std::move(coeff_qj));
+    }
+  }
+  return RnsPolynomial<ModularInt>::Create(std::move(coeff_vectors),
+                                           /*is_ntt=*/false);
+}
+
 }  // namespace rlwe
 
 #endif  // RLWE_RNS_ERROR_DISTRIBUTION_H_

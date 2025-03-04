@@ -320,7 +320,7 @@ RnsGaloisKey<ModularInt>::ApplyToRlweCiphertextWithRandomPad(
     return absl::InvalidArgumentError(
         "`ciphertext` does not have a matching RNS moduli set.");
   }
-  if (ciphertext.Degree() != 1) {
+  if (ciphertext.Degree() > 1) {
     return absl::InvalidArgumentError(
         "Galois key can only apply to a ciphertext of degree 1.");
   }
@@ -344,6 +344,126 @@ RnsGaloisKey<ModularInt>::ApplyToRlweCiphertextWithRandomPad(
   RLWE_ASSIGN_OR_RETURN(RnsPolynomial<ModularInt> c0, ciphertext.Component(0));
   RLWE_RETURN_IF_ERROR(c0_new.AddInPlace(c0, moduli_));
   return c0_new;
+}
+
+template <typename ModularInt>
+absl::StatusOr<RnsGaloisKey<ModularInt>> RnsGaloisKey<ModularInt>::Compose(
+    const RnsGaloisKey<ModularInt>& other_key) const {
+  // First we apply Galois automorphism X -> X^power on polynomials in other_key
+  int k = other_key.key_as_.size();
+  std::vector<RnsPolynomial<ModularInt>> other_key_as;
+  std::vector<RnsPolynomial<ModularInt>> other_key_bs;
+  other_key_as.reserve(k);
+  other_key_bs.reserve(k);
+  for (int i = 0; i < k; ++i) {
+    RLWE_ASSIGN_OR_RETURN(RnsPolynomial<ModularInt> a_sub,
+                          other_key.key_as_[i].Substitute(power_, moduli_));
+    other_key_as.push_back(std::move(a_sub));
+    RLWE_ASSIGN_OR_RETURN(RnsPolynomial<ModularInt> b_sub,
+                          other_key.key_bs_[i].Substitute(power_, moduli_));
+    other_key_bs.push_back(std::move(b_sub));
+  }
+
+  // Compute the polynomials in the composed key
+  std::vector<RnsPolynomial<ModularInt>> composed_key_as;
+  std::vector<RnsPolynomial<ModularInt>> composed_key_bs;
+  composed_key_as.reserve(k);
+  composed_key_bs.reserve(k);
+
+  int log_n = key_as_[0].LogN();
+  for (int i = 0; i < k; ++i) {
+    // Gadget decompose the a part of the other key
+    if (other_key_as[i].IsNttForm()) {
+      RLWE_RETURN_IF_ERROR(other_key_as[i].ConvertToCoeffForm(moduli_));
+    }
+    RLWE_ASSIGN_OR_RETURN(std::vector<RnsPolynomial<ModularInt>> a_digits,
+                          gadget_->Decompose(other_key_as[i], moduli_));
+
+    RLWE_ASSIGN_OR_RETURN(
+        auto composed_a,
+        RnsPolynomial<ModularInt>::CreateZero(log_n, moduli_, true));
+    for (int j = 0; j < k; ++j) {
+      RLWE_RETURN_IF_ERROR(a_digits[j].ConvertToNttForm(moduli_));
+      RLWE_RETURN_IF_ERROR(
+          composed_a.FusedMulAddInPlace(a_digits[j], key_as_[j], moduli_));
+    }
+    composed_key_as.push_back(std::move(composed_a));
+
+    RnsPolynomial<ModularInt> composed_b = other_key_bs[i];
+    for (int j = 0; j < k; ++j) {
+      RLWE_RETURN_IF_ERROR(
+          composed_b.FusedMulAddInPlace(a_digits[j], key_bs_[j], moduli_));
+    }
+    composed_key_bs.push_back(std::move(composed_b));
+  }
+
+  int cyclotomic_order = 1 << (log_n + 1);
+  int composed_power = (power_ * other_key.power_) % cyclotomic_order;
+  // The composed key is not generated from a PRNG.
+  return RnsGaloisKey(std::move(composed_key_as), std::move(composed_key_bs),
+                      other_key.gadget_, composed_power, moduli_,
+                      /*prng_seed=*/"", PRNG_TYPE_INVALID);
+}
+
+template <typename ModularInt>
+absl::StatusOr<std::vector<RnsPolynomial<ModularInt>>>
+RnsGaloisKey<ModularInt>::CreatePadOfComposedKey(
+    const std::vector<RnsPolynomial<ModularInt>>& gk0_as,
+    const std::vector<std::vector<RnsPolynomial<ModularInt>>>& gk1_as_digits,
+    absl::Span<const PrimeModulus<ModularInt>* const> moduli) {
+  int k = gk0_as.size();
+  int log_n = gk0_as[0].LogN();
+  // We have as[i] = <g^-1(gk1_as[i]), gk0_as>
+  //               = <gk1_as_digits[i], gk0_as> (mod Q)
+  std::vector<RnsPolynomial<ModularInt>> composed_as;
+  composed_as.reserve(k);
+  for (int i = 0; i < k; ++i) {
+    RLWE_ASSIGN_OR_RETURN(
+        RnsPolynomial<ModularInt> composed_a,
+        RnsPolynomial<ModularInt>::CreateZero(log_n, moduli,
+                                              /*is_ntt=*/true));
+    for (int j = 0; j < k; ++j) {
+      RLWE_RETURN_IF_ERROR(composed_a.FusedMulAddInPlace(gk1_as_digits[i][j],
+                                                         gk0_as[j], moduli));
+    }
+    composed_as.push_back(std::move(composed_a));
+  }
+  return composed_as;
+}
+
+template <typename ModularInt>
+absl::StatusOr<RnsGaloisKey<ModularInt>>
+RnsGaloisKey<ModularInt>::ComposeWithPads(
+    const RnsGaloisKey<ModularInt>& other_key,
+    const std::vector<std::vector<RnsPolynomial<ModularInt>>>& other_a_digits,
+    std::vector<RnsPolynomial<ModularInt>> composed_key_as) const {
+  int k = other_key.key_bs_.size();
+  std::vector<RnsPolynomial<ModularInt>> other_key_bs;
+  other_key_bs.reserve(k);
+  for (int i = 0; i < k; ++i) {
+    RLWE_ASSIGN_OR_RETURN(RnsPolynomial<ModularInt> b_sub,
+                          other_key.key_bs_[i].Substitute(power_, moduli_));
+    other_key_bs.push_back(std::move(b_sub));
+  }
+
+  // Compute the polynomials in the composed key
+  std::vector<RnsPolynomial<ModularInt>> composed_key_bs;
+  composed_key_bs.reserve(k);
+  for (int i = 0; i < k; ++i) {
+    RnsPolynomial<ModularInt> composed_b = other_key_bs[i];
+    for (int j = 0; j < k; ++j) {
+      RLWE_RETURN_IF_ERROR(composed_b.FusedMulAddInPlace(other_a_digits[i][j],
+                                                         key_bs_[j], moduli_));
+    }
+    composed_key_bs.push_back(std::move(composed_b));
+  }
+
+  int cyclotomic_order = 1 << (composed_key_bs[0].LogN() + 1);
+  int composed_power = (power_ * other_key.power_) % cyclotomic_order;
+  // The composed key is not generated from a PRNG.
+  return RnsGaloisKey(std::move(composed_key_as), std::move(composed_key_bs),
+                      other_key.gadget_, composed_power, moduli_,
+                      /*prng_seed=*/"", PRNG_TYPE_INVALID);
 }
 
 template class RnsGaloisKey<MontgomeryInt<Uint16>>;

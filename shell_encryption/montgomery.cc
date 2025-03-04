@@ -14,10 +14,32 @@
 
 #include "shell_encryption/montgomery.h"
 
+#include <vector>
+
 #include "absl/status/statusor.h"
 #include "shell_encryption/transcription.h"
 
 namespace rlwe {
+
+namespace {
+
+template <typename T>
+MontgomeryInt<T> ToMontgomeryInt(
+    typename MontgomeryInt<T>::Int n,
+    const typename MontgomeryInt<T>::Params* params) {
+  using Int = typename MontgomeryInt<T>::Int;
+  using BigInt = typename MontgomeryInt<T>::BigInt;
+  using Params = typename MontgomeryInt<T>::Params;
+  BigInt product = static_cast<BigInt>(params->r_mod_modulus_barrett) * n;
+  Int result = static_cast<Int>(product >> Params::bitsize_int);
+  result = n * params->r_mod_modulus - result * params->modulus;
+  // The steps above produce an integer that is in the range [0, 2N).
+  // We now reduce to the range [0, N).
+  result -= (result >= params->modulus) ? params->modulus : 0;
+  return MontgomeryInt<T>(result);
+}
+
+}  // namespace
 
 template <typename T>
 rlwe::StatusOr<std::unique_ptr<const MontgomeryIntParams<T>>>
@@ -72,13 +94,18 @@ std::tuple<T, T> MontgomeryIntParams<T>::Inverses(BigInt modulus_bigint,
 template <typename T>
 rlwe::StatusOr<MontgomeryInt<T>> MontgomeryInt<T>::ImportInt(
     Int n, const Params* params) {
-  BigInt product = static_cast<BigInt>(params->r_mod_modulus_barrett) * n;
-  Int result = static_cast<Int>(product >> Params::bitsize_int);
-  result = n * params->r_mod_modulus - result * params->modulus;
-  // The steps above produce an integer that is in the range [0, 2N).
-  // We now reduce to the range [0, N).
-  result -= (result >= params->modulus) ? params->modulus : 0;
-  return MontgomeryInt(result);
+  return ToMontgomeryInt<T>(n, params);
+}
+
+template <typename T>
+rlwe::StatusOr<std::vector<MontgomeryInt<T>>> MontgomeryInt<T>::BatchImportInts(
+    const std::vector<Int>& ints, const Params* params) {
+  std::vector<MontgomeryInt<T>> result;
+  result.reserve(ints.size());
+  for (int i = 0; i < ints.size(); ++i) {
+    result.push_back(ToMontgomeryInt<T>(ints[i], params));
+  }
+  return result;
 }
 
 template <typename T>

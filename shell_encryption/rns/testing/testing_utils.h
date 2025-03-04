@@ -18,6 +18,7 @@
 #ifndef RLWE_RNS_TESTING_TESTING_UTILS_H_
 #define RLWE_RNS_TESTING_TESTING_UTILS_H_
 
+#include <complex>
 #include <cstdint>
 #include <vector>
 
@@ -44,6 +45,22 @@ std::vector<Integer> SampleMessages(int num_values, Integer max_value) {
     messages.push_back(message);
   }
   return messages;
+}
+
+inline std::vector<std::complex<double>> SampleComplexValues(
+    int num_values, uint64_t max_value, uint64_t precision) {
+  absl::BitGen bitgen;
+  std::vector<std::complex<double>> values;
+  for (int i = 0; i < num_values; ++i) {
+    uint64_t u = absl::Uniform<uint64_t>(bitgen, 0, max_value * 2 * precision);
+    uint64_t v = absl::Uniform<uint64_t>(bitgen, 0, max_value * 2 * precision);
+    int64_t real = static_cast<int64_t>(u) - max_value * precision;
+    int64_t imag = static_cast<int64_t>(v) - max_value * precision;
+    std::complex<double> value{static_cast<double>(real) / precision,
+                               static_cast<double>(imag) / precision};
+    values.push_back(value);
+  }
+  return values;
 }
 
 // Returns a RnsPolynomial in Z[X]/(Q, X^N+1) whose coefficients are random

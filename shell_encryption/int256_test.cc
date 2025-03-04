@@ -16,6 +16,7 @@
 #include "shell_encryption/int256.h"
 
 #include <algorithm>
+#include <cmath>
 #include <random>
 #include <sstream>
 #include <type_traits>
@@ -586,5 +587,47 @@ TEST(Int256, Intrinsic) {
   EXPECT_EQ(Uint256Low128Intrinsic(z_init), lo);
 }
 #endif
+
+TEST(Int256, ConversionFromFloatingPointNumberTests) {
+  // verify that an integer greater than 2**64 that can be stored precisely
+  // inside a double is converted to a uint256 without loss of information.
+  double precise_double0 = std::ldexp(0x530e, 64) + 0xda74000000000000;
+  uint256 from_precise_double0(precise_double0);
+  uint256 from_precise_ints0(absl::MakeUint128(0x530e, 0xda74000000000000));
+  EXPECT_EQ(from_precise_double0, from_precise_ints0);
+  EXPECT_DOUBLE_EQ(static_cast<double>(from_precise_ints0), precise_double0);
+
+  // Similarly, an integer greater than 2**128 that can be stored precisely
+  // inside a double can be converted to a uint256 without loss of information.
+  double precise_double1 = std::ldexp(0x29137, 128) + std::ldexp(0x9876, 92);
+  uint256 from_precise_double1(precise_double1);
+  uint256 from_precise_ints1(absl::MakeUint128(0, 0x29137),
+                             absl::MakeUint128(0x98760000000, 0));
+  EXPECT_EQ(from_precise_double1, from_precise_ints1);
+  EXPECT_DOUBLE_EQ(static_cast<double>(from_precise_ints1), precise_double1);
+
+  // For integers that cannot be precisely stored inside a double, we check that
+  // when the approximate double value is converted to a uint256 and then back
+  // to a double, there is no further loss of information.
+  double approx_double0 =
+      static_cast<double>(0xffffeeeeddddcccc) * std::pow(2.0, 64.0) +
+      static_cast<double>(0xbbbbaaaa99998888);
+  uint256 from_approx_double0(approx_double0);
+  EXPECT_DOUBLE_EQ(static_cast<double>(from_approx_double0), approx_double0);
+
+  double approx_double1 =
+      static_cast<double>(0xffffeeeeddddcccc) * std::pow(2.0, 128.0) +
+      static_cast<double>(0xbbbbaaaa99998888) * std::pow(2.0, 64) +
+      static_cast<double>(0x7777666655554444);
+  uint256 from_approx_double1(approx_double1);
+  EXPECT_DOUBLE_EQ(static_cast<double>(from_approx_double1), approx_double1);
+
+  double round_to_zero = 0.7;
+  double round_to_five = 5.8;
+  double round_to_nine = 9.3;
+  EXPECT_EQ(static_cast<uint256>(round_to_zero), 0);
+  EXPECT_EQ(static_cast<uint256>(round_to_five), 5);
+  EXPECT_EQ(static_cast<uint256>(round_to_nine), 9);
+}
 
 }  // namespace rlwe

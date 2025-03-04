@@ -201,6 +201,14 @@ TYPED_TEST(RnsPolynomialTest, CreateIsCorrect) {
   EXPECT_TRUE(b.IsNttForm());
 }
 
+TYPED_TEST(RnsPolynomialTest, CreateEmptyGivesCorrectValues) {
+  auto empty = RnsPolynomial<TypeParam>::CreateEmpty();
+  EXPECT_EQ(empty.LogN(), 0);
+  EXPECT_EQ(empty.NumCoeffs(), 1);
+  EXPECT_EQ(empty.NumModuli(), 0);
+  EXPECT_TRUE(empty.Coeffs().empty());
+}
+
 TYPED_TEST(RnsPolynomialTest, CreateZeroFailsIfLogNIsNotPositive) {
   EXPECT_THAT(RnsPolynomial<TypeParam>::CreateZero(/*log_n=*/-1, {}),
               StatusIs(absl::StatusCode::kInvalidArgument,

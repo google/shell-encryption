@@ -82,6 +82,7 @@ cc_library(
         "@com_github_google_googletest//:gtest",
         "@com_google_absl//absl/status",
         "@com_google_protobuf//:differencer",
+        "@com_google_protobuf//:protobuf",
     ],
 )
 
@@ -97,6 +98,7 @@ cc_library(
         "@com_github_google_googletest//:gtest",
         "@com_google_absl//absl/status",
         "@com_google_protobuf//:differencer",
+        "@com_google_protobuf//:protobuf",
     ],
 )
 

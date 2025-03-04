@@ -24,6 +24,7 @@
 #include "absl/strings/str_format.h"
 #include "shell_encryption/constants.h"
 #include "shell_encryption/dft_transformations.h"
+#include "shell_encryption/dft_transformations_hwy.h"
 #include "shell_encryption/ntt_parameters.h"
 #include "shell_encryption/opt/constant_polynomial.h"
 #include "shell_encryption/prng/prng.h"
@@ -75,6 +76,15 @@ class Polynomial {
       // An error value.
       return Polynomial();
     }
+    return Polynomial(std::move(poly_coeffs));
+  }
+
+  static rlwe::StatusOr<Polynomial> ConvertToNttFast(
+      std::vector<ModularInt> poly_coeffs,
+      const NttParameters<ModularInt>* ntt_params,
+      const ModularIntParams* modular_params) {
+    RLWE_RETURN_IF_ERROR(internal::ForwardNumberTheoreticTransformHwy(
+        poly_coeffs, *ntt_params, *modular_params));
     return Polynomial(std::move(poly_coeffs));
   }
 

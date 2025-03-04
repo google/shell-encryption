@@ -87,6 +87,12 @@ class RnsContext {
       absl::Span<const typename ModularInt::Int> ps,
       typename ModularInt::Int plaintext_modulus);
 
+  // Creates a RnsContext suitable for instantiating the CKKS scheme, with main
+  // prime moduli `qs`, auxiliary prime moduli `ps`.
+  static absl::StatusOr<RnsContext> CreateForCkks(
+      int log_n, absl::Span<const typename ModularInt::Int> qs,
+      absl::Span<const typename ModularInt::Int> ps);
+
   // Returns the log of the dimension N.
   int LogN() const { return log_n_; }
 
@@ -237,12 +243,16 @@ class RnsContext {
   explicit RnsContext(
       int log_n,
       std::vector<std::unique_ptr<const PrimeModulus<ModularInt>>> modulus_qs,
-      std::vector<std::unique_ptr<const PrimeModulus<ModularInt>>> modulus_ps,
-      typename ModularInt::Int plaintext_modulus)
+      std::vector<std::unique_ptr<const PrimeModulus<ModularInt>>> modulus_ps)
       : log_n_(log_n),
         modulus_qs_(std::move(modulus_qs)),
-        modulus_ps_(std::move(modulus_ps)),
-        plaintext_modulus_(std::move(plaintext_modulus)) {}
+        modulus_ps_(std::move(modulus_ps)) {}
+
+  // Creates a RnsContext for common operations among RLWE-based schemes, with
+  // main prime moduli `qs`, auxiliary prime moduli `ps`.
+  static absl::StatusOr<RnsContext> CreateCommon(
+      int log_n, absl::Span<const typename ModularInt::Int> qs,
+      absl::Span<const typename ModularInt::Int> ps);
 
   // Computes the CRT constants relevant to main and auxiliary prime moduli.
   absl::Status GenerateCrtConstantsForMainModulus();
