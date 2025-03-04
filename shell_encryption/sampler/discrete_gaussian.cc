@@ -53,25 +53,20 @@ inline size_t FindInCdt(const std::vector<Uint64>& cdt, Uint64 u) {
 
 template <typename Integer>
 absl::StatusOr<std::unique_ptr<DiscreteGaussianSampler<Integer>>>
-DiscreteGaussianSampler<Integer>::Create(double s_base) {
-  if (s_base < std::sqrt(2) * kSmoothingParameter) {
-    return absl::InvalidArgumentError(
-        "`s_base` must be at least sqrt(2) times the smoothing parameter.");
-  }
-
-  // Approximate sum(exp(-x^2 / (2 * s_base^2)), for x over the integers).
-  double mass_base = sqrt(2 * M_PI) * s_base;
+DiscreteGaussianSampler<Integer>::Create(double s) {
+  // Approximate sum(exp(-x^2 / (2 * s^2)), for x over the integers).
+  double mass = sqrt(2 * M_PI) * s;
 
   // Initialize the CDF table for the base sampler. We cut off the base
   // distribution at the following `bound` as the probability mass beyond it is
   // negligible.
-  int cut_off_bound = kTailBoundMultiplier * std::ceil(s_base);
+  int cut_off_bound = kTailBoundMultiplier * std::ceil(s);
   std::vector<double> cdf;
   cdf.reserve(2 * cut_off_bound + 1);
   for (int x = -cut_off_bound; x <= cut_off_bound; ++x) {
-    double y = static_cast<double>(x) / s_base;
+    double y = static_cast<double>(x) / s;
     double p = std::exp(-(y * y) / 2);  // Gaussian function at x.
-    cdf.push_back(p / mass_base);
+    cdf.push_back(p / mass);
   }
   for (int i = 0; i < 2 * cut_off_bound; ++i) {
     cdf[i + 1] += cdf[i];
@@ -83,7 +78,19 @@ DiscreteGaussianSampler<Integer>::Create(double s_base) {
     cdt.push_back(static_cast<Uint64>(p * std::exp2(kPrecision)));
   }
   return absl::WrapUnique(
-      new DiscreteGaussianSampler<Integer>(s_base, std::move(cdt)));
+      new DiscreteGaussianSampler<Integer>(s, std::move(cdt)));
+}
+
+template <typename Integer>
+absl::StatusOr<std::unique_ptr<DiscreteGaussianSampler<Integer>>>
+DiscreteGaussianSampler<Integer>::CreateGeneric(double s_base) {
+  if (s_base < std::sqrt(2) * kSmoothingParameter) {
+    return absl::InvalidArgumentError(
+        "`s_base` must be at least sqrt(2) times the smoothing parameter.");
+  }
+
+  // Create a base sampler.
+  return Create(s_base);
 }
 
 template <typename Integer>
@@ -99,7 +106,7 @@ absl::StatusOr<Integer> DiscreteGaussianSampler<Integer>::SampleWithIterations(
 
   // Use the base sampler if `num_iterations` == 0.
   if (num_iterations == 0) {
-    return SampleBase(prng);
+    return Sample(prng);
   }
 
   // Implements the arbitrary standard deviation discrete Gaussian sampling in
@@ -121,7 +128,7 @@ absl::StatusOr<Integer> DiscreteGaussianSampler<Integer>::SampleWithIterations(
 }
 
 template <typename Integer>
-absl::StatusOr<Integer> DiscreteGaussianSampler<Integer>::SampleBase(
+absl::StatusOr<Integer> DiscreteGaussianSampler<Integer>::Sample(
     SecurePrng& prng) const {
   // Sample 64 uniformly random bits. We use the last bit as the sign, and the
   // first 63 random bits to look up the scaled CDF table.
@@ -167,7 +174,7 @@ DiscreteGaussianSampler<Integer>::SampleIIterative(SecurePrng& prng,
 
   // Base case: sample from the base distribution.
   if (i == 0) {
-    RLWE_ASSIGN_OR_RETURN(Integer x, SampleBase(prng));
+    RLWE_ASSIGN_OR_RETURN(Integer x, Sample(prng));
     return std::make_pair(x, s_base_);
   }
 
@@ -184,7 +191,7 @@ DiscreteGaussianSampler<Integer>::SampleIIterative(SecurePrng& prng,
   std::vector<Integer> samples;
   samples.reserve(num_samples);
   for (int j = 0; j < num_samples; ++j) {
-    RLWE_ASSIGN_OR_RETURN(auto sample, SampleBase(prng));
+    RLWE_ASSIGN_OR_RETURN(auto sample, Sample(prng));
     samples.push_back(std::move(sample));
   }
 

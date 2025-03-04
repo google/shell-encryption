@@ -34,6 +34,11 @@ constexpr Uint64 kNewhopeModulus = 12289;
 constexpr Uint64 kNewhopeLogDegreeBound = 10;
 constexpr Uint64 kNewhopeDegreeBound = 1 << kNewhopeLogDegreeBound;
 
+// RLWE parameters for a 62 bit modulus.
+constexpr Uint64 kModulus62 = 4611686018427322369;
+constexpr Uint64 kLogDegreeBound62 = 11;
+constexpr Uint64 kDegreeBound62 = 1L << kLogDegreeBound62;
+
 // Montgomery parameters for a 59-bit modulus.
 constexpr Uint64 kModulus59 = 332366567264636929;
 constexpr Uint64 kInvModulus59 = 7124357790306815999;
@@ -54,6 +59,11 @@ constexpr Uint64 kDegreeBound29 = 1L << kLogDegreeBound29;
 constexpr Uint64 kModulus25 = 33538049;
 constexpr Uint64 kLogDegreeBound25 = 10;
 constexpr Uint64 kDegreeBound25 = 1L << kLogDegreeBound25;
+
+// RLWE parameters for a 30 bit modulus.
+constexpr Uint64 kModulus30 = 1073707009;
+constexpr Uint64 kLogDegreeBound30 = 10;
+constexpr Uint64 kDegreeBound30 = 1L << kLogDegreeBound30;
 
 // RLWE parameters for an 80-bit modulus.
 // The modulus represented in decimal is 646119422561999443726337.

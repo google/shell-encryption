@@ -241,6 +241,12 @@ class ABSL_MUST_USE_RESULT MontgomeryInt {
   static rlwe::StatusOr<MontgomeryInt> ImportInt(
       Int n, const Params* params);
 
+  // Static factory that converts a vector of a non-Montgomery representation
+  // integers, the underlying integer types, into a vector of Montgomery
+  // representation integer. Does not take ownership of params.
+  static rlwe::StatusOr<std::vector<MontgomeryInt>> BatchImportInts(
+      const std::vector<Int>& ints, const Params* params);
+
   // Construction given `n` in Montgomery representation. If the input in not in
   // Montgomery representation, one should use the ImportInt() function instead.
   explicit MontgomeryInt(Int n) : n_(n) {}

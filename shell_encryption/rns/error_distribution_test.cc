@@ -239,6 +239,18 @@ TYPED_TEST(ErrorDistributionTest,
                   this->dg_sampler_.get(), this->prng_.get()),
               StatusIs(absl::StatusCode::kInvalidArgument,
                        HasSubstr("`log_n` must be positive")));
+
+  // Sample from the base Gaussian distribution.
+  EXPECT_THAT(SampleDiscreteGaussian<TypeParam>(
+                  /*log_n=*/-1, this->moduli_, this->dg_sampler_.get(),
+                  this->prng_.get()),
+              StatusIs(absl::StatusCode::kInvalidArgument,
+                       HasSubstr("`log_n` must be positive")));
+  EXPECT_THAT(SampleDiscreteGaussian<TypeParam>(
+                  /*log_n=*/0, this->moduli_, this->dg_sampler_.get(),
+                  this->prng_.get()),
+              StatusIs(absl::StatusCode::kInvalidArgument,
+                       HasSubstr("`log_n` must be positive")));
 }
 
 TYPED_TEST(ErrorDistributionTest, SampleDiscreteGaussianFailsIfModuliIsEmpty) {
@@ -249,6 +261,11 @@ TYPED_TEST(ErrorDistributionTest, SampleDiscreteGaussianFailsIfModuliIsEmpty) {
                   this->prng_.get()),
               StatusIs(absl::StatusCode::kInvalidArgument,
                        HasSubstr("`moduli` must not be empty")));
+  EXPECT_THAT(
+      SampleDiscreteGaussian<TypeParam>(
+          log_n, /*moduli=*/{}, this->dg_sampler_.get(), this->prng_.get()),
+      StatusIs(absl::StatusCode::kInvalidArgument,
+               HasSubstr("`moduli` must not be empty")));
 }
 
 TYPED_TEST(ErrorDistributionTest, SampleDiscreteGaussianFailsIfSamplerIsNull) {
@@ -258,16 +275,22 @@ TYPED_TEST(ErrorDistributionTest, SampleDiscreteGaussianFailsIfSamplerIsNull) {
                   this->prng_.get()),
               StatusIs(absl::StatusCode::kInvalidArgument,
                        HasSubstr("`dg_sampler` must not be null")));
+  EXPECT_THAT(
+      SampleDiscreteGaussian<TypeParam>(
+          log_n, this->moduli_, /*dg_sampler=*/nullptr, this->prng_.get()),
+      StatusIs(absl::StatusCode::kInvalidArgument,
+               HasSubstr("`dg_sampler` must not be null")));
 }
 
 TYPED_TEST(ErrorDistributionTest,
            SampleDiscreteGaussianReturnsPolynomialWithBoundedCoefficients) {
   this->SetUpGaussianSampler();
   int log_n = this->rns_context_->LogN();
-  ASSERT_OK_AND_ASSIGN(RnsPolynomial<TypeParam> e,
-                       SampleDiscreteGaussian<TypeParam>(
-                           log_n, kBaseGaussianS, this->moduli_,
-                           this->dg_sampler_.get(), this->prng_.get()));
+  double s = this->dg_sampler_->BaseParameter() * 2;
+  ASSERT_OK_AND_ASSIGN(
+      RnsPolynomial<TypeParam> e,
+      SampleDiscreteGaussian<TypeParam>(
+          log_n, s, this->moduli_, this->dg_sampler_.get(), this->prng_.get()));
   ASSERT_EQ(e.NumModuli(), this->moduli_.size());
   ASSERT_EQ(e.NumCoeffs(), 1 << log_n);
 
@@ -284,6 +307,41 @@ TYPED_TEST(ErrorDistributionTest,
 
   auto [e_coeff_min, e_coeff_max] =
       std::minmax_element(e_coeffs_q0.begin(), e_coeffs_q0.end());
+  int32_t coeff_max_bound = static_cast<int32_t>(std::round(
+      DiscreteGaussianSampler<typename TypeParam::Int>::kTailBoundMultiplier *
+      s));
+  EXPECT_GT(*e_coeff_max, 0);
+  EXPECT_LT(*e_coeff_max, coeff_max_bound);
+  EXPECT_GT(*e_coeff_min, -coeff_max_bound);
+  EXPECT_LT(*e_coeff_min, 0);
+}
+
+TYPED_TEST(ErrorDistributionTest,
+           SampleDiscreteGaussianBaseReturnsPolynomialWithBoundedCoefficients) {
+  this->SetUpGaussianSampler();
+  int log_n = this->rns_context_->LogN();
+  ASSERT_OK_AND_ASSIGN(
+      RnsPolynomial<TypeParam> e,
+      SampleDiscreteGaussian<TypeParam>(
+          log_n, this->moduli_, this->dg_sampler_.get(), this->prng_.get()));
+  ASSERT_EQ(e.NumModuli(), this->moduli_.size());
+  ASSERT_EQ(e.NumCoeffs(), 1 << log_n);
+
+  // We choose a small standard deviation s such that e (mod qi) and e (mod qj)
+  // should represent the same integer values for all RNS moduli qi and qj.
+  // Moreover, the coefficients should have bounded values.
+  std::vector<int32_t> e_coeffs_q0 = this->ConvertToSignedIntegerValues(
+      e.Coeffs()[0], this->moduli_[0]->ModParams());
+  for (int i = 1; i < this->moduli_.size(); ++i) {
+    std::vector<int32_t> e_coeffs_qi = this->ConvertToSignedIntegerValues(
+        e.Coeffs()[i], this->moduli_[i]->ModParams());
+    EXPECT_EQ(e_coeffs_q0, e_coeffs_qi);
+  }
+
+  auto [e_coeff_min, e_coeff_max] =
+      std::minmax_element(e_coeffs_q0.begin(), e_coeffs_q0.end());
+  // The base Gaussian sampler is instantiated with `kBaseGaussianS`, so we
+  // compute the expected max norm using a tail bound.
   int32_t coeff_max_bound = static_cast<int32_t>(
       DiscreteGaussianSampler<typename TypeParam::Int>::kTailBoundMultiplier *
       kBaseGaussianS);

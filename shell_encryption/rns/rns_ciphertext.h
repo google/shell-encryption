@@ -137,6 +137,22 @@ class RnsRlweCiphertext {
     return absl::OkStatus();
   }
 
+  // Homomorphically add another ciphertext `that` to this ciphertext without
+  // updating the "a" component (useful if it can be precomputed).
+  absl::Status AddInPlaceWithoutPad(const RnsRlweCiphertext& that) {
+    if (Level() != that.Level()) {
+      return absl::InvalidArgumentError("`that` has a mismatched level.");
+    }
+    if (PowerOfS() != that.PowerOfS()) {
+      return absl::InvalidArgumentError(
+          "`that` is encrypted with a different key power.");
+    }
+    RLWE_RETURN_IF_ERROR(
+        components_[0].AddInPlace(that.components_[0], moduli_));
+    error_ += that.error_;
+    return absl::OkStatus();
+  }
+
   // Homomorphically subtract `that` from this ciphertext.
   // It is assumed that the two ciphertexts have the same modulus and the same
   // plaintext modulus.
@@ -169,6 +185,23 @@ class RnsRlweCiphertext {
     return absl::OkStatus();
   }
 
+  // Homomorphically subtract another ciphertext `that` to this ciphertext
+  // without updating the "a" component (useful if it can be precomputed).
+  absl::Status SubInPlaceWithoutPad(const RnsRlweCiphertext& that) {
+    if (Level() != that.Level()) {
+      return absl::InvalidArgumentError("`that` has a mismatched level.");
+    }
+    if (PowerOfS() != that.PowerOfS()) {
+      return absl::InvalidArgumentError(
+          "`that` is encrypted with a different key power.");
+    }
+
+    RLWE_RETURN_IF_ERROR(
+        components_[0].SubInPlace(that.components_[0], moduli_));
+    error_ += that.error_;
+    return absl::OkStatus();
+  }
+
   // Homomorphically multiply `plaintext` to this ciphertext.
   // It is assumed that the plaintext has coefficients modulo the plaintext
   // modulus of this ciphertext.
@@ -188,6 +221,13 @@ class RnsRlweCiphertext {
     for (auto& c : components_) {
       RLWE_RETURN_IF_ERROR(c.MulInPlace(monomial, moduli_));
     }
+    return absl::OkStatus();
+  }
+
+  // Homomorphically absorb a monomial without updating the "a" component.
+  absl::Status AbsorbMonomialInPlaceWithoutPad(
+      const RnsPolynomial<ModularInt>& monomial) {
+    RLWE_RETURN_IF_ERROR(components_[0].MulInPlace(monomial, moduli_));
     return absl::OkStatus();
   }
 

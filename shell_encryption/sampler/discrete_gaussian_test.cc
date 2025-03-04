@@ -42,23 +42,24 @@ using TestTypes = ::testing::Types<Uint64, absl::uint128>;
 // Gaussian parameter of the base sampler.
 constexpr double kBaseS = 12.8;
 
-TEST(DiscreteGaussianSampler, CreateFailsIfSBaseIsTooSmall) {
+TEST(DiscreteGaussianSampler, CreateGenericFailsIfSBaseIsTooSmall) {
   // The Gaussian parameter of the base sampler, `s_base`, must be at least
   // sqrt(2) * kSmoothParameter, or about 7.55.
-  EXPECT_THAT(DiscreteGaussianSampler<Uint64>::Create(/*s_base=*/-1),
+  EXPECT_THAT(DiscreteGaussianSampler<Uint64>::CreateGeneric(/*s_base=*/-1),
               StatusIs(absl::StatusCode::kInvalidArgument,
                        HasSubstr("`s_base` must be at least")));
-  EXPECT_THAT(DiscreteGaussianSampler<Uint64>::Create(/*s_base=*/0),
+  EXPECT_THAT(DiscreteGaussianSampler<Uint64>::CreateGeneric(/*s_base=*/0),
               StatusIs(absl::StatusCode::kInvalidArgument,
                        HasSubstr("`s_base` must be at least")));
-  EXPECT_THAT(DiscreteGaussianSampler<Uint64>::Create(/*s_base=*/3),
+  EXPECT_THAT(DiscreteGaussianSampler<Uint64>::CreateGeneric(/*s_base=*/3),
               StatusIs(absl::StatusCode::kInvalidArgument,
                        HasSubstr("`s_base` must be at least")));
 }
 
 TEST(DiscreteGaussianSampler, SampleWithIterationsFailsIfSIsTooSmall) {
-  ASSERT_OK_AND_ASSIGN(auto sampler, DiscreteGaussianSampler<Uint64>::Create(
-                                         /*s_base=*/kBaseS));
+  ASSERT_OK_AND_ASSIGN(auto sampler,
+                       DiscreteGaussianSampler<Uint64>::CreateGeneric(
+                           /*s_base=*/kBaseS));
   constexpr int num_iterations = 0;
   auto prng = testing::TestingPrng(0);
   EXPECT_THAT(
@@ -69,8 +70,9 @@ TEST(DiscreteGaussianSampler, SampleWithIterationsFailsIfSIsTooSmall) {
 
 TEST(DiscreteGaussianSampler,
      SampleWithIterationsFailsIfNumIterationsIsNegative) {
-  ASSERT_OK_AND_ASSIGN(auto sampler, DiscreteGaussianSampler<Uint64>::Create(
-                                         /*s_base=*/kBaseS));
+  ASSERT_OK_AND_ASSIGN(auto sampler,
+                       DiscreteGaussianSampler<Uint64>::CreateGeneric(
+                           /*s_base=*/kBaseS));
   auto prng = testing::TestingPrng(0);
   EXPECT_THAT(sampler->SampleWithIterations(/*s=*/kBaseS,
                                             /*num_iterations=*/-1, prng),
@@ -79,8 +81,9 @@ TEST(DiscreteGaussianSampler,
 }
 
 TEST(DiscreteGaussianSampler, NumIterationsFailsIfSIsTooSmall) {
-  ASSERT_OK_AND_ASSIGN(auto sampler, DiscreteGaussianSampler<Uint64>::Create(
-                                         /*s_base=*/kBaseS));
+  ASSERT_OK_AND_ASSIGN(auto sampler,
+                       DiscreteGaussianSampler<Uint64>::CreateGeneric(
+                           /*s_base=*/kBaseS));
   EXPECT_THAT(sampler->NumIterations(/*s=*/kBaseS / 2.0),
               StatusIs(absl::StatusCode::kInvalidArgument,
                        HasSubstr("`s` must be at least the base s")));
@@ -95,7 +98,7 @@ TYPED_TEST(DiscreteGaussianSamplerTest, SampleHasBoundedSize) {
   using DGSampler = DiscreteGaussianSampler<TypeParam>;
   constexpr int num_samples = 1024;
   testing::TestingPrng prng(0);
-  ASSERT_OK_AND_ASSIGN(auto sampler, DGSampler::Create(kBaseS));
+  ASSERT_OK_AND_ASSIGN(auto sampler, DGSampler::CreateGeneric(kBaseS));
 
   std::vector<double> gaussian_parameters = {kBaseS, 2 * kBaseS};
   if (sizeof(TypeParam) > 2) {
@@ -117,6 +120,27 @@ TYPED_TEST(DiscreteGaussianSamplerTest, SampleHasBoundedSize) {
   }
 }
 
+// Checks that the sampler supports a fixed small standard deviation.
+TYPED_TEST(DiscreteGaussianSamplerTest, SampleFromBaseGaussian) {
+  using DGSampler = DiscreteGaussianSampler<TypeParam>;
+  constexpr int num_samples = 10000;
+
+  testing::TestingPrng prng(0);
+  ASSERT_OK_AND_ASSIGN(auto sampler, DGSampler::Create(kBaseS));
+
+  TypeParam expected_bound = static_cast<TypeParam>(
+      std::ceil(DGSampler::kTailBoundMultiplier * kBaseS));
+  for (int i = 0; i < num_samples; ++i) {
+    ASSERT_OK_AND_ASSIGN(TypeParam x, sampler->Sample(prng));
+    bool is_negative = x > DGSampler::kNegativeThreshold;
+    if (is_negative) {
+      EXPECT_LT(-x, expected_bound);
+    } else {
+      EXPECT_LT(x, expected_bound);
+    }
+  }
+}
+
 // Checks that the sampler supports very large standard deviation.
 TYPED_TEST(DiscreteGaussianSamplerTest, LargeStandardDeviation) {
   using DGSampler = DiscreteGaussianSampler<TypeParam>;
@@ -129,8 +153,7 @@ TYPED_TEST(DiscreteGaussianSamplerTest, LargeStandardDeviation) {
   // Use a larger base Gaussian parameter to speed up the sampling process.
   double s_base = 64 / std::sqrt(2 * M_PI);
   testing::TestingPrng prng(0);
-  ASSERT_OK_AND_ASSIGN(auto sampler,
-                       DiscreteGaussianSampler<TypeParam>::Create(s_base));
+  ASSERT_OK_AND_ASSIGN(auto sampler, DGSampler::CreateGeneric(s_base));
 
   std::vector<double> gaussian_parameters = {std::exp2(30), std::exp2(50)};
   for (double s : gaussian_parameters) {

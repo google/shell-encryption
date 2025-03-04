@@ -19,6 +19,7 @@
 #include <list>
 #include <memory>
 #include <random>
+#include <vector>
 
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
@@ -141,6 +142,32 @@ TYPED_TEST(MontgomeryTest, ImportExportInt) {
                            TypeParam::ImportInt(a, modulus_params.get()));
       Int after = m.ExportInt(modulus_params.get());
       EXPECT_EQ(after, a);
+    }
+  }
+}
+
+// Verifies that numbers can be imported and exported properly.
+TYPED_TEST(MontgomeryTest, BatchImportExportInts) {
+  using Int = typename TypeParam::Int;
+  const int batch_size = 100;
+  for (const auto& params :
+       rlwe::testing::ContextParameters<TypeParam>::Value()) {
+    ASSERT_OK_AND_ASSIGN(auto modulus_params,
+                         TypeParam::Params::Create(params.modulus));
+
+    for (Int i = 0; i < kTestingRounds; ++i) {
+      std::vector<Int> ints;
+      for (int j = 0; j < batch_size; ++j) {
+        unsigned int seed = j;
+        Int a = GenerateRandom<Int>(&seed) % modulus_params->modulus;
+        ints.push_back(a);
+      }
+      ASSERT_OK_AND_ASSIGN(
+          auto m, TypeParam::BatchImportInts(ints, modulus_params.get()));
+      for (int j = 0; j < batch_size; ++j) {
+        Int after = m[j].ExportInt(modulus_params.get());
+        EXPECT_EQ(after, ints[j]);
+      }
     }
   }
 }

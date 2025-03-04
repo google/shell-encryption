@@ -15,14 +15,17 @@
 
 #include "shell_encryption/dft_transformations.h"
 
+#include <complex>
+#include <memory>
 #include <vector>
 
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
+#include "absl/status/status.h"
+#include "absl/strings/str_cat.h"
 #include "shell_encryption/context.h"
-#include "shell_encryption/montgomery.h"
-#include "shell_encryption/ntt_parameters.h"
 #include "shell_encryption/status_macros.h"
+#include "shell_encryption/statusor.h"
 #include "shell_encryption/testing/parameters.h"
 #include "shell_encryption/testing/status_matchers.h"
 #include "shell_encryption/testing/status_testing.h"
@@ -134,6 +137,44 @@ TYPED_TEST(DftTransformationsTest, InverseNumberTheoreticTransform) {
       EXPECT_EQ(coeffs[i], zero);
     }
   }
+}
+
+TEST(DftTransformations, IterativeHalfCooleyTukeyFailsIfNotEnoughPsis) {
+  constexpr int len = 1 << 5;
+  std::vector<std::complex<double>> values(len, {0, 0});
+  std::vector<std::complex<double>> too_short_psis = {{1, 0}};
+  EXPECT_THAT(
+      IterativeHalfCooleyTukey(values, too_short_psis),
+      StatusIs(absl::StatusCode::kInvalidArgument,
+               HasSubstr("Not enough primitive roots in `psis_bitrev`")));
+}
+
+TEST(DftTransformations, IterativeHalfCooleyTukeyFailsIfWrongInputLength) {
+  constexpr int incorrect_len = 7;  // not a power of 2.
+  std::vector<std::complex<double>> values(incorrect_len, {0, 0});
+  std::vector<std::complex<double>> psis(incorrect_len, {1, 0});
+  EXPECT_THAT(IterativeHalfCooleyTukey(values, psis),
+              StatusIs(absl::StatusCode::kInvalidArgument,
+                       HasSubstr("size of `coeffs` must be a power of two")));
+}
+
+TEST(DftTransformations, IterativeHalfGentlemanSandeFailsIfNotEnoughPsis) {
+  constexpr int len = 1 << 5;
+  std::vector<std::complex<double>> values(len, {0, 0});
+  std::vector<std::complex<double>> too_short_psis = {{1, 0}};
+  EXPECT_THAT(
+      IterativeHalfGentlemanSande(values, too_short_psis),
+      StatusIs(absl::StatusCode::kInvalidArgument,
+               HasSubstr("Not enough primitive roots in `psis_bitrev_inv`")));
+}
+
+TEST(DftTransformations, IterativeHalfGentlemanSandeFailsIfWrongInputLength) {
+  constexpr int incorrect_len = 7;  // not a power of 2.
+  std::vector<std::complex<double>> values(incorrect_len, {0, 0});
+  std::vector<std::complex<double>> psis_inv(incorrect_len, {1, 0});
+  EXPECT_THAT(IterativeHalfGentlemanSande(values, psis_inv),
+              StatusIs(absl::StatusCode::kInvalidArgument,
+                       HasSubstr("size of `coeffs` must be a power of two")));
 }
 
 }  // namespace

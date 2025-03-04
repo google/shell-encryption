@@ -16,6 +16,7 @@
 #ifndef RLWE_DFT_TRANSFORMATIONS_H_
 #define RLWE_DFT_TRANSFORMATIONS_H_
 
+#include <complex>
 #include <utility>
 #include <vector>
 
@@ -23,7 +24,7 @@
 #include "shell_encryption/ntt_parameters.h"
 #include "shell_encryption/status_macros.h"
 
-// This file implements various discrete Fourier transformtions to be used by
+// This file implements various discrete Fourier transformations to be used by
 // arithmetic in polynomial rings.
 
 namespace rlwe {
@@ -198,6 +199,24 @@ absl::Status InverseNumberTheoreticTransform(
   }
   return absl::OkStatus();
 }
+
+// Performs the special log_len iterations of the Cooley-Tukey butterfly on
+// `coeffs` in-place, which has length 2^log_len.
+// This computes the DFT transform phi: coeffs -> {coeffs(psi^(4k+1))}_j
+// where coeffs are coefficients of a polynomial of degree 2^log_len - 1, and
+// {psi_j}_j are primitive 2N'th roots of unity for N = 2^(log_len + 1), i.e.
+// psi = exp(PI * I / (2N)).
+absl::Status IterativeHalfCooleyTukey(
+    std::vector<std::complex<double>>& coeffs,
+    const std::vector<std::complex<double>>& psis_bitrev);
+
+// Performs the special log_len iterations of the Gentleman-Sande butterfly on
+// `coeffs` in-place, which has length 2^log_len.
+// This computes the inverse of the transform phi, where phi is the DFT
+// phi: coeffs -> {coeffs(psi_j)}_{j = 4*k+1}.
+absl::Status IterativeHalfGentlemanSande(
+    std::vector<std::complex<double>>& coeffs,
+    const std::vector<std::complex<double>>& psis_bitrev_inv);
 
 }  // namespace rlwe
 

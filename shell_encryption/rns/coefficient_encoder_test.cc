@@ -22,7 +22,9 @@
 #include <gtest/gtest.h>
 #include "absl/log/check.h"
 #include "absl/status/status.h"
+#include "absl/strings/str_cat.h"
 #include "absl/types/span.h"
+#include "shell_encryption/rns/crt_interpolation.h"
 #include "shell_encryption/rns/rns_context.h"
 #include "shell_encryption/rns/rns_modulus.h"
 #include "shell_encryption/rns/rns_polynomial.h"
@@ -79,20 +81,21 @@ class CoefficientEncoderTest : public ::testing::Test {
 
 TYPED_TEST_SUITE(CoefficientEncoderTest, testing::ModularIntTypes);
 
-TYPED_TEST(CoefficientEncoderTest, CreateFailsIfContextIsNull) {
+template <typename ModularInt>
+class CoefficientEncoderNegativeTest
+    : public CoefficientEncoderTest<ModularInt> {};
+
+TYPED_TEST_SUITE(CoefficientEncoderNegativeTest,
+                 testing::ModularIntTypesForNegativeTests);
+
+TYPED_TEST(CoefficientEncoderNegativeTest, CreateFailsIfContextIsNull) {
   EXPECT_THAT(CoefficientEncoder<TypeParam>::Create(/*context=*/nullptr),
               StatusIs(absl::StatusCode::kInvalidArgument,
                        HasSubstr("`context` must not be null")));
 }
 
-TYPED_TEST(CoefficientEncoderTest, CreateSucceeds) {
-  ASSERT_OK_AND_ASSIGN(auto encoder, CoefficientEncoder<TypeParam>::Create(
-                                         this->rns_context_.get()));
-  EXPECT_EQ(encoder.LogN(), this->rns_context_->LogN());
-  EXPECT_EQ(encoder.PlaintextModulus(), this->rns_context_->PlaintextModulus());
-}
-
-TYPED_TEST(CoefficientEncoderTest, EncodeBgvFailsIfMessageVectorIsTooLong) {
+TYPED_TEST(CoefficientEncoderNegativeTest,
+           EncodeBgvFailsIfMessageVectorIsTooLong) {
   using Integer = typename TypeParam::Int;
   ASSERT_OK_AND_ASSIGN(auto encoder, CoefficientEncoder<TypeParam>::Create(
                                          this->rns_context_.get()));
@@ -102,9 +105,14 @@ TYPED_TEST(CoefficientEncoderTest, EncodeBgvFailsIfMessageVectorIsTooLong) {
               StatusIs(absl::StatusCode::kInvalidArgument,
                        HasSubstr(absl::StrCat("`messages` can contain at most ",
                                               num_coeffs_max, " elements"))));
+  Integer t = this->rns_context_->PlaintextModulus();
+  EXPECT_THAT(encoder.template EncodeBgv<Integer>(messages, t, this->moduli_),
+              StatusIs(absl::StatusCode::kInvalidArgument,
+                       HasSubstr(absl::StrCat("`messages` can contain at most ",
+                                              num_coeffs_max, " elements"))));
 }
 
-TYPED_TEST(CoefficientEncoderTest, EncodeBgvFailsIfEmptyModuli) {
+TYPED_TEST(CoefficientEncoderNegativeTest, EncodeBgvFailsIfEmptyModuli) {
   using Integer = typename TypeParam::Int;
   ASSERT_OK_AND_ASSIGN(auto encoder, CoefficientEncoder<TypeParam>::Create(
                                          this->rns_context_.get()));
@@ -113,9 +121,15 @@ TYPED_TEST(CoefficientEncoderTest, EncodeBgvFailsIfEmptyModuli) {
   EXPECT_THAT(encoder.EncodeBgv(messages, /*moduli=*/{}),
               StatusIs(absl::StatusCode::kInvalidArgument,
                        HasSubstr("`moduli` cannot be empty")));
+
+  Integer t = this->rns_context_->PlaintextModulus();
+  EXPECT_THAT(encoder.template EncodeBgv<Integer>(messages, t, /*moduli=*/{}),
+              StatusIs(absl::StatusCode::kInvalidArgument,
+                       HasSubstr("`moduli` cannot be empty")));
 }
 
-TYPED_TEST(CoefficientEncoderTest, DecodeBgvFailsIfWrongNumberOfModuli) {
+TYPED_TEST(CoefficientEncoderNegativeTest,
+           DecodeBgvFailsIfWrongNumberOfModuli) {
   using Integer = typename TypeParam::Int;
   ASSERT_OK_AND_ASSIGN(auto encoder, CoefficientEncoder<TypeParam>::Create(
                                          this->rns_context_.get()));
@@ -131,6 +145,49 @@ TYPED_TEST(CoefficientEncoderTest, DecodeBgvFailsIfWrongNumberOfModuli) {
       StatusIs(absl::StatusCode::kInvalidArgument,
                HasSubstr(absl::StrCat("`moduli` must contain ", num_moduli,
                                       " RNS moduli"))));
+}
+
+TYPED_TEST(CoefficientEncoderNegativeTest,
+           DecodeBgvWithBigPlaintextFailsIfWrongNumberOfModuli) {
+  using Integer = typename TypeParam::Int;
+  ASSERT_OK_AND_ASSIGN(auto encoder, CoefficientEncoder<TypeParam>::Create(
+                                         this->rns_context_.get()));
+  ASSERT_OK_AND_ASSIGN(auto zero,
+                       RnsPolynomial<TypeParam>::CreateZero(
+                           this->rns_context_->LogN(), this->moduli_));
+  // Run DecodeBgv() which accepts large plaintext modulus, with constants
+  // whose sizes do not match the plaintext polynomial.
+  int num_moduli = this->moduli_.size();
+  int level = num_moduli - 1;
+  Integer t = this->rns_context_->PlaintextModulus();
+  std::vector<Integer> modulus_hats =
+      RnsModulusComplements<TypeParam, Integer>(this->moduli_);
+  ASSERT_OK_AND_ASSIGN(std::vector<TypeParam> modulus_hat_invs,
+                       this->rns_context_->MainPrimeModulusCrtFactors(level));
+  EXPECT_THAT(
+      encoder.template DecodeBgv<Integer>(
+          zero, t, absl::MakeSpan(this->moduli_).subspan(0, num_moduli - 1),
+          modulus_hats, modulus_hat_invs),
+      StatusIs(absl::StatusCode::kInvalidArgument,
+               HasSubstr(absl::StrCat("`moduli`"))));
+  EXPECT_THAT(encoder.template DecodeBgv<Integer>(
+                  zero, t, this->moduli_,
+                  absl::MakeSpan(modulus_hats).subspan(0, num_moduli - 1),
+                  modulus_hat_invs),
+              StatusIs(absl::StatusCode::kInvalidArgument,
+                       HasSubstr(absl::StrCat("`modulus_hats`"))));
+  EXPECT_THAT(encoder.template DecodeBgv<Integer>(
+                  zero, t, this->moduli_, modulus_hats,
+                  absl::MakeSpan(modulus_hat_invs).subspan(0, num_moduli - 1)),
+              StatusIs(absl::StatusCode::kInvalidArgument,
+                       HasSubstr(absl::StrCat("`modulus_hat_invs`"))));
+}
+
+TYPED_TEST(CoefficientEncoderTest, CreateSucceeds) {
+  ASSERT_OK_AND_ASSIGN(auto encoder, CoefficientEncoder<TypeParam>::Create(
+                                         this->rns_context_.get()));
+  EXPECT_EQ(encoder.LogN(), this->rns_context_->LogN());
+  EXPECT_EQ(encoder.PlaintextModulus(), this->rns_context_->PlaintextModulus());
 }
 
 // Checks `EncodeBgv()` works as expected when the message vector contains fewer
@@ -310,6 +367,60 @@ TYPED_TEST(CoefficientEncoderTest,
     for (int i = 0; i < num_coeffs; ++i) {
       EXPECT_EQ(decoded[i], (xs[i] * scalar) % t);
     }
+  }
+}
+
+TYPED_TEST(CoefficientEncoderTest, EncodeBgvWithLargePlaintextModulus) {
+  using Integer = typename TypeParam::Int;
+  using BigInteger = typename testing::CompositeModulus<Integer>::value_type;
+
+  int modulus_bits = 0;
+  for (auto modulus : this->moduli_) {
+    modulus_bits += modulus->ModParams()->log_modulus;
+  }
+  // Let the plaintext modulus be 2^(log(Q) - 16), which should be satisfied
+  // by most parameters.
+  if (modulus_bits < 16) {
+    GTEST_SKIP() << "Insufficient modulus bits";
+  }
+  BigInteger plaintext_modulus = 1;
+  plaintext_modulus <<= (modulus_bits - 16);
+
+  ASSERT_OK_AND_ASSIGN(auto encoder, CoefficientEncoder<TypeParam>::Create(
+                                         this->rns_context_.get()));
+
+  // Encode some special values with small absolute value.
+  std::vector<BigInteger> xs;
+  xs.push_back(1);
+  xs.push_back(static_cast<BigInteger>(plaintext_modulus - 1));  // -1
+  xs.push_back(static_cast<BigInteger>(plaintext_modulus - 2));  // -2
+  ASSERT_OK_AND_ASSIGN(auto poly, encoder.template EncodeBgv<BigInteger>(
+                                      xs, plaintext_modulus, this->moduli_));
+  ASSERT_FALSE(poly.IsNttForm());
+  for (int i = 0; i < this->moduli_.size(); ++i) {
+    // Since values in xs are all small (in absolute values), their CRT coeffs
+    // are easy to compute.
+    auto mod_params_qi = this->moduli_[i]->ModParams();
+    Integer qi = mod_params_qi->modulus;
+    EXPECT_EQ(poly.Coeffs()[i][0].ExportInt(mod_params_qi), 1);
+    EXPECT_EQ(poly.Coeffs()[i][1].ExportInt(mod_params_qi), qi - 1);
+    EXPECT_EQ(poly.Coeffs()[i][2].ExportInt(mod_params_qi), qi - 2);
+  }
+  // Decode the polynomial.
+  auto level = this->moduli_.size() - 1;
+  std::vector<BigInteger> modulus_hats =
+      RnsModulusComplements<TypeParam, BigInteger>(this->moduli_);
+  ASSERT_OK_AND_ASSIGN(std::vector<TypeParam> modulus_hat_invs,
+                       this->rns_context_->MainPrimeModulusCrtFactors(level));
+  ASSERT_OK_AND_ASSIGN(auto decoded, encoder.template DecodeBgv<BigInteger>(
+                                         poly, plaintext_modulus, this->moduli_,
+                                         modulus_hats, modulus_hat_invs));
+  ASSERT_EQ(decoded.size(), 1 << this->rns_context_->LogN());
+  EXPECT_EQ(decoded[0], xs[0]);
+  EXPECT_EQ(decoded[1], xs[1]);
+  EXPECT_EQ(decoded[2], xs[2]);
+  for (int i = 3; i < decoded.size(); ++i) {
+    EXPECT_EQ(decoded[i], 0);
   }
 }
 

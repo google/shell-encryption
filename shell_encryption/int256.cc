@@ -15,9 +15,12 @@
 
 #include "shell_encryption/int256.h"
 
+#include <cassert>
 #include <iomanip>
 #include <iostream>
+#include <limits>
 #include <sstream>
+#include <type_traits>
 
 #include <glog/logging.h>
 #include "absl/numeric/int128.h"
@@ -132,6 +135,28 @@ void uint256::DivModImpl(uint256 dividend, uint256 divisor,
   *quotient_ret = quotient;
   *remainder_ret = dividend;
 }
+
+template <typename T>
+uint256 MakeUint256FromFloat(T v) {
+  static_assert(std::is_floating_point<T>::value, "");
+
+  // Undefined behavior if v is NaN or cannot fit into uint256.
+  assert(std::isfinite(v) && v > -1 &&
+         (std::numeric_limits<T>::max_exponent <= 256 ||
+          v < std::ldexp(static_cast<T>(1), 256)));
+
+  // Rounding behavior is towards zero, same as for built-in types.
+  if (v >= std::ldexp(static_cast<T>(1), 128)) {
+    absl::uint128 top = static_cast<absl::uint128>(std::ldexp(v, -128));
+    absl::uint128 bot =
+        static_cast<absl::uint128>(v - std::ldexp(static_cast<T>(top), 128));
+    return uint256(top, bot);
+  }
+  return uint256(0, static_cast<absl::uint128>(v));
+}
+
+uint256::uint256(float v) : uint256(MakeUint256FromFloat(v)) {}
+uint256::uint256(double v) : uint256(MakeUint256FromFloat(v)) {}
 
 uint256& uint256::operator/=(const uint256& divisor) {
   uint256 quotient = 0;

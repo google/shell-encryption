@@ -17,9 +17,9 @@
 #ifndef RLWE_TESTING_PROTOBUF_MATCHERS_H_
 #define RLWE_TESTING_PROTOBUF_MATCHERS_H_
 
-#include <google/protobuf/message.h>
-#include <google/protobuf/message_lite.h>
-#include <google/protobuf/util/message_differencer.h>
+#include "google/protobuf/message.h"
+#include "google/protobuf/message_lite.h"
+#include "google/protobuf/util/message_differencer.h"
 #include <gmock/gmock.h>
 
 namespace rlwe {

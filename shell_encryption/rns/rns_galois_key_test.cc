@@ -264,6 +264,41 @@ TYPED_TEST(RnsGaloisKeyTest, CreateFromKeyComponentsFailsIfIncorrectDimension) {
                HasSubstr("must have the same length as the gadget dimension")));
 }
 
+TYPED_TEST(RnsGaloisKeyTest, DeserializeFailsIfGadgetIsNull) {
+  constexpr int k_power = 5;
+  this->SetUpDefaultBfvParameters();
+  ASSERT_OK_AND_ASSIGN(RnsRlweSecretKey<TypeParam> secret_key,
+                       this->SampleSecretKey());
+  ASSERT_OK_AND_ASSIGN(
+      RnsGaloisKey<TypeParam> gk,
+      RnsGaloisKey<TypeParam>::CreateForBfv(secret_key, k_power, kVariance,
+                                            this->gadget_.get(), kPrngType));
+  ASSERT_OK_AND_ASSIGN(SerializedRnsGaloisKey serialized, gk.Serialize());
+
+  EXPECT_THAT(RnsGaloisKey<TypeParam>::Deserialize(
+                  serialized, /*gadget=*/nullptr, this->main_moduli_),
+              StatusIs(absl::StatusCode::kInvalidArgument,
+                       HasSubstr("`gadget` must not be null")));
+}
+
+TYPED_TEST(RnsGaloisKeyTest, DeserializeFailsIfKeybsIsEmpty) {
+  constexpr int k_power = 5;
+  this->SetUpDefaultBfvParameters();
+  ASSERT_OK_AND_ASSIGN(RnsRlweSecretKey<TypeParam> secret_key,
+                       this->SampleSecretKey());
+  ASSERT_OK_AND_ASSIGN(
+      RnsGaloisKey<TypeParam> gk,
+      RnsGaloisKey<TypeParam>::CreateForBfv(secret_key, k_power, kVariance,
+                                            this->gadget_.get(), kPrngType));
+  ASSERT_OK_AND_ASSIGN(SerializedRnsGaloisKey serialized, gk.Serialize());
+  serialized.clear_key_bs();
+
+  EXPECT_THAT(RnsGaloisKey<TypeParam>::Deserialize(
+                  serialized, this->gadget_.get(), this->main_moduli_),
+              StatusIs(absl::StatusCode::kInvalidArgument,
+                       HasSubstr("`key_bs` must not be empty")));
+}
+
 TYPED_TEST(RnsGaloisKeyTest, ApplyToFailsIfCiphertextHasMismatchPowerOfS) {
   constexpr int k_gk_power = 5;
   constexpr int k_ctxt_power = 1;
@@ -947,6 +982,177 @@ TYPED_TEST(RnsGaloisKeyTest, GaloisKeyForBfvWithPrecomputedPads) {
       expected.push_back(values[index]);
     }
 
+    EXPECT_EQ(decryptions, expected);
+  }
+}
+
+// Check that a Galois key composed from two Galois keys with substitution power
+// a and b, resp, can key switch a ciphertext with substitution power a*b % 2N.
+TYPED_TEST(RnsGaloisKeyTest, ComposedGaloisKeyForBgv) {
+  using Encoder = FiniteFieldEncoder<TypeParam>;
+  using Integer = typename TypeParam::Int;
+  constexpr int k_log_gadget_base = 5;
+  constexpr int k_power0 = 5;   // rotation by one slot.
+  constexpr int k_power1 = 25;  // rotation by two slots.
+  constexpr int k_combined_offset = 3;
+  for (auto params :
+       testing::GetRnsParametersForFiniteFieldEncoding<TypeParam>()) {
+    // Use a smaller gadget base to keep the composed Galois key's error small.
+    params.log_gadget_base = k_log_gadget_base;
+    this->SetUpBgvParameters(params);
+
+    ASSERT_OK_AND_ASSIGN(auto encoder,
+                         Encoder::Create(this->rns_context_.get()));
+    ASSERT_OK_AND_ASSIGN(RnsRlweSecretKey<TypeParam> secret_key,
+                         this->SampleSecretKey());
+
+    // Create two Galois keys with different substitution powers.
+    Integer t = this->rns_context_->PlaintextModulus();
+    ASSERT_OK_AND_ASSIGN(RnsGaloisKey<TypeParam> gk0,
+                         RnsGaloisKey<TypeParam>::CreateForBgv(
+                             secret_key, k_power0, kVariance,
+                             this->gadget_.get(), t, kPrngType));
+    ASSERT_OK_AND_ASSIGN(RnsGaloisKey<TypeParam> gk1,
+                         RnsGaloisKey<TypeParam>::CreateForBgv(
+                             secret_key, k_power1, kVariance,
+                             this->gadget_.get(), t, kPrngType));
+
+    // Compose the two Galois keys.
+    ASSERT_OK_AND_ASSIGN(RnsGaloisKey<TypeParam> gk_composed, gk0.Compose(gk1));
+    ASSERT_EQ(gk_composed.SubstitutionPower(), k_power0 * k_power1);
+
+    // Apply the composed Galois key on a ciphertext w/ substitution power a*b.
+    int num_coeffs = 1 << this->rns_context_->LogN();
+    std::vector<Integer> values =
+        testing::SampleMessages<Integer>(num_coeffs, t);
+    ASSERT_OK_AND_ASSIGN(
+        RnsBgvCiphertext<TypeParam> ciphertext,
+        secret_key.template EncryptBgv<Encoder>(
+            values, &encoder, this->error_params_.get(), this->prng_.get()));
+    ASSERT_OK_AND_ASSIGN(auto ciphertext_sub,
+                         ciphertext.Substitute(k_power0 * k_power1));
+    ASSERT_OK_AND_ASSIGN(auto ciphertext_rot,
+                         gk_composed.ApplyTo(ciphertext_sub));
+    ASSERT_EQ(ciphertext_rot.PowerOfS(), 1);
+
+    // The key-switched ciphertext should encrypt a slot vector that is rotated
+    // by the combined offset.
+    ASSERT_OK_AND_ASSIGN(
+        auto decryptions,
+        secret_key.template DecryptBgv<Encoder>(ciphertext_rot, &encoder));
+
+    int group_size = num_coeffs / 2;
+    std::vector<Integer> expected;
+    for (int i = 0; i < group_size; ++i) {
+      int index = (i + k_combined_offset) % group_size;
+      expected.push_back(values[index]);
+    }
+    for (int i = 0; i < group_size; ++i) {
+      int index = group_size + (i + k_combined_offset) % group_size;
+      expected.push_back(values[index]);
+    }
+
+    EXPECT_EQ(decryptions, expected);
+  }
+}
+
+// Similar to the previous test, but generate a composed Galois key using
+// precomputed "a" (aka pad) components and use the Galois key for BFV.
+TYPED_TEST(RnsGaloisKeyTest, ComposedGaloisKeyForBfvWithPrecomputedPads) {
+  using Encoder = FiniteFieldEncoder<TypeParam>;
+  using Integer = typename TypeParam::Int;
+  constexpr int k_log_gadget_base = 5;
+  constexpr int k_power0 = 5;   // rotation by one slot.
+  constexpr int k_power1 = 25;  // rotation by two slots.
+  constexpr int k_combined_offset = 3;
+  for (auto params :
+       testing::GetBfvParametersForFiniteFieldEncoding<TypeParam>()) {
+    // This is a very rough estimation on whether the parameter is suitable for
+    // Galois key composition.
+    if (params.log_gadget_base < k_log_gadget_base * 2) {
+      continue;
+    }
+
+    // Use a smaller gadget base to keep the composed Galois key's error small.
+    params.log_gadget_base = k_log_gadget_base;
+    this->SetUpBfvParameters(params);
+
+    ASSERT_OK_AND_ASSIGN(auto encoder,
+                         Encoder::Create(this->rns_context_.get()));
+    ASSERT_OK_AND_ASSIGN(RnsRlweSecretKey<TypeParam> secret_key,
+                         this->SampleSecretKey());
+
+    // Create two Galois keys with different substitution powers.
+    Integer t = this->rns_context_->PlaintextModulus();
+    ASSERT_OK_AND_ASSIGN(
+        RnsGaloisKey<TypeParam> gk0,
+        RnsGaloisKey<TypeParam>::CreateForBfv(secret_key, k_power0, kVariance,
+                                              this->gadget_.get(), kPrngType));
+    ASSERT_OK_AND_ASSIGN(
+        RnsGaloisKey<TypeParam> gk1,
+        RnsGaloisKey<TypeParam>::CreateForBfv(secret_key, k_power1, kVariance,
+                                              this->gadget_.get(), kPrngType));
+
+    // Precompute the "a" components of the composed Galois key.
+    int gk_dimension = gk1.Dimension();
+    const std::vector<RnsPolynomial<TypeParam>>& gk1_as = gk1.GetKeyA();
+    std::vector<RnsPolynomial<TypeParam>> gk1_sub_as;
+    gk1_sub_as.reserve(gk_dimension);
+    for (int i = 0; i < gk_dimension; ++i) {
+      ASSERT_OK_AND_ASSIGN(auto a_sub,
+                           gk1_as[i].Substitute(k_power0, this->main_moduli_));
+      ASSERT_OK(a_sub.ConvertToCoeffForm(this->main_moduli_));
+      gk1_sub_as.push_back(std::move(a_sub));
+    }
+    ASSERT_OK_AND_ASSIGN(
+        auto gk1_a_sub_digits,
+        this->gadget_->Decompose(gk1_sub_as, this->main_moduli_));
+    for (auto& digits : gk1_a_sub_digits) {
+      for (auto& digit : digits) {
+        ASSERT_OK(digit.ConvertToNttForm(this->main_moduli_));
+      }
+    }
+    ASSERT_OK_AND_ASSIGN(
+        auto gk_composed_as,
+        RnsGaloisKey<TypeParam>::CreatePadOfComposedKey(
+            gk0.GetKeyA(), gk1_a_sub_digits, this->main_moduli_));
+
+    // Generate the composed key using the precompued "a" components.
+    ASSERT_OK_AND_ASSIGN(
+        RnsGaloisKey<TypeParam> gk_composed,
+        gk0.ComposeWithPads(gk1, gk1_a_sub_digits, gk_composed_as));
+    ASSERT_EQ(gk_composed.SubstitutionPower(), k_power0 * k_power1);
+
+    // Apply the composed Galois key on a ciphertext w/ substitution power a*b.
+    int num_coeffs = 1 << this->rns_context_->LogN();
+    std::vector<Integer> values =
+        testing::SampleMessages<Integer>(num_coeffs, t);
+    ASSERT_OK_AND_ASSIGN(
+        auto ciphertext,
+        secret_key.template EncryptBfv<Encoder>(
+            values, &encoder, this->error_params_.get(), this->prng_.get()));
+    ASSERT_OK_AND_ASSIGN(auto ciphertext_sub,
+                         ciphertext.Substitute(k_power0 * k_power1));
+    ASSERT_OK_AND_ASSIGN(auto ciphertext_rot,
+                         gk_composed.ApplyTo(ciphertext_sub));
+    ASSERT_EQ(ciphertext_rot.PowerOfS(), 1);
+
+    // The key-switched ciphertext should encrypt a slot vector that is rotated
+    // by the combined offset.
+    ASSERT_OK_AND_ASSIGN(
+        auto decryptions,
+        secret_key.template DecryptBfv<Encoder>(ciphertext_rot, &encoder));
+
+    int group_size = num_coeffs / 2;
+    std::vector<Integer> expected;
+    for (int i = 0; i < group_size; ++i) {
+      int index = (i + k_combined_offset) % group_size;
+      expected.push_back(values[index]);
+    }
+    for (int i = 0; i < group_size; ++i) {
+      int index = group_size + (i + k_combined_offset) % group_size;
+      expected.push_back(values[index]);
+    }
     EXPECT_EQ(decryptions, expected);
   }
 }

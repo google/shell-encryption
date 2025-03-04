@@ -16,19 +16,16 @@
 #include "shell_encryption/rns/rns_context.h"
 
 #include "absl/memory/memory.h"
+#include "absl/status/statusor.h"
 
 namespace rlwe {
 
 template <typename ModularInt>
-absl::StatusOr<RnsContext<ModularInt>> RnsContext<ModularInt>::Create(
+absl::StatusOr<RnsContext<ModularInt>> RnsContext<ModularInt>::CreateCommon(
     int log_n, absl::Span<const typename ModularInt::Int> qs,
-    absl::Span<const typename ModularInt::Int> ps,
-    typename ModularInt::Int plaintext_modulus) {
+    absl::Span<const typename ModularInt::Int> ps) {
   if (log_n <= 0) {
     return absl::InvalidArgumentError("`log_n` must be positive.");
-  }
-  if (plaintext_modulus == 0) {
-    return absl::InvalidArgumentError("`plaintext_modulus` must be positive.");
   }
 
   std::vector<std::unique_ptr<const PrimeModulus<ModularInt>>> modulus_qs;
@@ -66,9 +63,26 @@ absl::StatusOr<RnsContext<ModularInt>> RnsContext<ModularInt>::Create(
   }
 
   RnsContext<ModularInt> context(log_n, std::move(modulus_qs),
-                                 std::move(modulus_ps), plaintext_modulus);
+                                 std::move(modulus_ps));
   RLWE_RETURN_IF_ERROR(context.GenerateCrtConstantsForMainModulus());
   RLWE_RETURN_IF_ERROR(context.GenerateCrtConstantsForAuxModulus());
+
+  return context;
+}
+
+template <typename ModularInt>
+absl::StatusOr<RnsContext<ModularInt>> RnsContext<ModularInt>::Create(
+    int log_n, absl::Span<const typename ModularInt::Int> qs,
+    absl::Span<const typename ModularInt::Int> ps,
+    typename ModularInt::Int plaintext_modulus) {
+  if (plaintext_modulus == 0) {
+    return absl::InvalidArgumentError("`plaintext_modulus` must be positive.");
+  }
+
+  RLWE_ASSIGN_OR_RETURN(RnsContext<ModularInt> context,
+                        CreateCommon(log_n, qs, ps));
+
+  context.plaintext_modulus_ = plaintext_modulus;
   RLWE_RETURN_IF_ERROR(context.GeneratePlaintextModulusConstants());
   return context;
 }
@@ -143,6 +157,13 @@ RnsContext<ModularInt>::CreateForBfvFiniteFieldEncoding(
   // Generate BFV specific plaintext modulus related constants.
   RLWE_RETURN_IF_ERROR(context.GeneratePlaintextModulusConstantsForBfv());
   return context;
+}
+
+template <typename ModularInt>
+absl::StatusOr<RnsContext<ModularInt>> RnsContext<ModularInt>::CreateForCkks(
+    int log_n, absl::Span<const typename ModularInt::Int> qs,
+    absl::Span<const typename ModularInt::Int> ps) {
+  return CreateCommon(log_n, qs, ps);
 }
 
 template <typename ModularInt>
@@ -424,17 +445,25 @@ absl::Status RnsContext<ModularInt>::GeneratePlaintextModulusConstantsForBfv() {
   ql_invs_mod_t_.reserve(modulus_qs_.size());
   ModularInt ql_inv_mod_t = ModularInt::ImportOne(mod_params_t);
   for (int i = 0; i < modulus_qs_.size(); ++i) {
-    const ModularIntParams* mod_params_qi = modulus_qs_[i]->ModParams();
-    RLWE_ASSIGN_OR_RETURN(
-        ModularInt qi_mod_t,
-        ModularInt::ImportInt(mod_params_qi->modulus % plaintext_modulus_,
-                              mod_params_t));
-    RLWE_ASSIGN_OR_RETURN(ModularInt qi_inv_mod_t,
-                          qi_mod_t.MultiplicativeInverseFast(mod_params_t));
-    ql_inv_mod_t.MulInPlace(qi_inv_mod_t, mod_params_t);
-    ql_invs_mod_t_.push_back(ql_inv_mod_t);
-    q_invs_mod_t_.push_back(std::move(qi_inv_mod_t));
-    qs_mod_t_.push_back(std::move(qi_mod_t));
+    typename ModularInt::Int remainder =
+        modulus_qs_[i]->Modulus() % plaintext_modulus_;
+    // Compute q_i mod t and q_i^-1 mod t. If q_i mod t == 0, then we use 0 as
+    // a placeholder in `q_invs_mod_t_` and `ql_invs_mod_t_`.
+    if (remainder == 0) {
+      auto zero = ModularInt::ImportZero(mod_params_t);
+      q_invs_mod_t_.push_back(zero);
+      ql_invs_mod_t_.push_back(zero);
+      qs_mod_t_.push_back(std::move(zero));
+    } else {
+      RLWE_ASSIGN_OR_RETURN(ModularInt qi_mod_t,
+                            ModularInt::ImportInt(remainder, mod_params_t));
+      RLWE_ASSIGN_OR_RETURN(ModularInt qi_inv_mod_t,
+                            qi_mod_t.MultiplicativeInverseFast(mod_params_t));
+      ql_inv_mod_t.MulInPlace(qi_inv_mod_t, mod_params_t);
+      ql_invs_mod_t_.push_back(ql_inv_mod_t);
+      q_invs_mod_t_.push_back(std::move(qi_inv_mod_t));
+      qs_mod_t_.push_back(std::move(qi_mod_t));
+    }
   }
   return absl::OkStatus();
 }

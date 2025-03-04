@@ -57,6 +57,14 @@ class RnsBfvCiphertext : public RnsRlweCiphertext<ModularInt> {
   explicit RnsBfvCiphertext(RnsRlweCiphertext<ModularInt> ciphertext)
       : RnsRlweCiphertext<ModularInt>(std::move(ciphertext)) {}
 
+  static RnsBfvCiphertext CreateZero(
+      std::vector<const PrimeModulus<ModularInt>*> moduli,
+      const RnsErrorParams<ModularInt>* error_params,
+      const RnsContext<ModularInt>* context) {
+    return RnsBfvCiphertext({}, moduli, /*power_of_s=*/1, 0, error_params,
+                            context);
+  }
+
   // Returns the homomorphic negation of this ciphertext.
   absl::StatusOr<RnsBfvCiphertext> Negate() const {
     RnsBfvCiphertext out = *this;
@@ -99,6 +107,13 @@ class RnsBfvCiphertext : public RnsRlweCiphertext<ModularInt> {
       const RnsPolynomial<ModularInt>& plaintext) const {
     RnsBfvCiphertext out = *this;
     RLWE_RETURN_IF_ERROR(out.SubInPlace(plaintext));
+    return out;
+  }
+
+  absl::StatusOr<RnsBfvCiphertext> SubWithoutPad(
+      const RnsBfvCiphertext& that) const {
+    RnsBfvCiphertext out = *this;
+    RLWE_RETURN_IF_ERROR(out.SubInPlaceWithoutPad(that));
     return out;
   }
 
@@ -195,6 +210,22 @@ class RnsBfvCiphertext : public RnsRlweCiphertext<ModularInt> {
                             c.Substitute(substitution_power, this->moduli()));
       subbed_components.push_back(std::move(subbed_c));
     }
+    int power_of_s = (this->PowerOfS() * substitution_power) %
+                     (2 * this->components()[0].NumCoeffs());
+    return RnsBfvCiphertext(subbed_components, this->moduli(), power_of_s,
+                            this->Error(), this->ErrorParams(), context_);
+  }
+
+  absl::StatusOr<RnsBfvCiphertext> SubstituteWithoutPad(
+      int substitution_power) const {
+    std::vector<RnsPolynomial<ModularInt>> subbed_components;
+    subbed_components.reserve(this->components().size());
+
+    RLWE_ASSIGN_OR_RETURN(
+        auto subbed_c,
+        this->components()[0].Substitute(substitution_power, this->moduli()));
+    subbed_components.push_back(std::move(subbed_c));
+
     int power_of_s = (this->PowerOfS() * substitution_power) %
                      (2 * this->components()[0].NumCoeffs());
     return RnsBfvCiphertext(subbed_components, this->moduli(), power_of_s,

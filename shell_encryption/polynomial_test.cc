@@ -28,6 +28,7 @@
 #include "shell_encryption/prng/integral_prng_testing_types.h"
 #include "shell_encryption/serialization.pb.h"
 #include "shell_encryption/status_macros.h"
+#include "shell_encryption/statusor.h"
 #include "shell_encryption/testing/coefficient_polynomial.h"
 #include "shell_encryption/testing/status_matchers.h"
 #include "shell_encryption/testing/status_testing.h"
@@ -102,8 +103,8 @@ class PolynomialTest : public ::testing::Test {
         Polynomial::ConvertToNtt(p_coeffs, ntt_params_.get(), params14_.get());
     ntt_q_ =
         Polynomial::ConvertToNtt(q_coeffs, ntt_params_.get(), params14_.get());
-    ntt_r_ =
-        Polynomial::ConvertToNtt(r_coeffs, ntt_params_.get(), params14_.get());
+    ntt_r_ = Polynomial::ConvertToNttFast(r_coeffs, ntt_params_.get(),
+                                          params14_.get());
   }
 
   std::unique_ptr<Prng> MakePrng(absl::string_view seed) {
@@ -118,7 +119,7 @@ class PolynomialTest : public ::testing::Test {
   std::unique_ptr<CoefficientPolynomial> r_;
   Polynomial ntt_p_;
   Polynomial ntt_q_;
-  Polynomial ntt_r_;
+  rlwe::StatusOr<Polynomial> ntt_r_;
   uint_m zero_;
 };
 
@@ -341,9 +342,9 @@ TYPED_TEST(PolynomialTest, FusedMulAddInPlace) {
 
     EXPECT_TRUE(this->ntt_p_.IsValid());
     EXPECT_TRUE(this->ntt_q_.IsValid());
-    EXPECT_TRUE(this->ntt_r_.IsValid());
+    EXPECT_TRUE((*this->ntt_r_).IsValid());
 
-    ASSERT_OK(this->ntt_p_.FusedMulAddInPlace(this->ntt_q_, this->ntt_r_,
+    ASSERT_OK(this->ntt_p_.FusedMulAddInPlace(this->ntt_q_, (*this->ntt_r_),
                                               this->params14_.get()));
 
     CoefficientPolynomial res(

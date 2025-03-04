@@ -243,6 +243,7 @@ cc_test(
 
 cc_library(
     name = "dft_transformations",
+    srcs = ["dft_transformations.cc"],
     hdrs = ["dft_transformations.h"],
     deps = [
         ":ntt_parameters",
@@ -260,15 +261,53 @@ cc_test(
     deps = [
         ":context",
         ":dft_transformations",
-        ":montgomery",
-        ":ntt_parameters",
         ":statusor_fork",
         "//shell_encryption/testing:parameters",
         "//shell_encryption/testing:status_is_fork",
         "//shell_encryption/testing:status_testing",
         "//shell_encryption/testing:testing_prng",
         "@com_github_google_googletest//:gtest_main",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/strings",
+    ],
+)
+
+cc_library(
+    name = "dft_transformations_hwy",
+    srcs = ["dft_transformations_hwy.cc"],
+    hdrs = [
+        "dft_transformations_hwy.h",
+    ],
+    deps = [
+        ":dft_transformations",
+        ":montgomery",
+        ":ntt_parameters",
+        ":statusor_fork",
+        "@com_github_google_highway//:hwy",
         "@com_google_absl//absl/numeric:int128",
+        "@com_google_absl//absl/status",
+    ],
+)
+
+cc_test(
+    name = "dft_transformations_hwy_test",
+    size = "small",
+    srcs = [
+        "dft_transformations_hwy_test.cc",
+    ],
+    deps = [
+        ":context",
+        ":dft_transformations",
+        ":dft_transformations_hwy",
+        ":statusor_fork",
+        "//shell_encryption/testing:parameters",
+        "//shell_encryption/testing:status_is_fork",
+        "//shell_encryption/testing:status_testing",
+        "//shell_encryption/testing:testing_prng",
+        "@com_github_google_googletest//:gtest_main",
+        "@com_github_google_highway//:hwy",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/strings",
     ],
 )
 
@@ -280,6 +319,7 @@ cc_library(
     deps = [
         ":constants",
         ":dft_transformations",
+        ":dft_transformations_hwy",
         ":ntt_parameters",
         ":serialization_cc_proto",
         ":statusor_fork",

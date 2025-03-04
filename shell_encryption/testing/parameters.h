@@ -50,6 +50,11 @@ typedef ::testing::Types<
     ModularIntTypes;
 #endif
 
+typedef ::testing::Types<rlwe::MontgomeryInt<Uint16>,
+                         rlwe::MontgomeryInt<Uint32>,
+                         rlwe::MontgomeryInt<Uint64>>
+    ModularIntTypesNoUint128;
+
 // Parameters for testing. These parameters must be specialized for each of the
 // ModularIntTypes above. By default, they contain an empty vector.
 // In a typed test, one can iterate over all the context parameters, and create
@@ -90,6 +95,9 @@ struct ContextParameters<MontgomeryInt<Uint32>> {
         RlweContext<MontgomeryInt<Uint32>>::Parameters{
             /*.modulus =*/kModulus29, /*.log_n =*/11, /*.log_t =*/5,
             /*.variance =*/8},
+        RlweContext<MontgomeryInt<Uint32>>::Parameters{
+            /*.modulus =*/kModulus30, /*.log_n =*/10, /*.log_t =*/1,
+            /*.variance =*/8},
     };
   }
 };
@@ -100,6 +108,9 @@ struct ContextParameters<MontgomeryInt<Uint64>> {
     return {
         RlweContext<MontgomeryInt<Uint64>>::Parameters{
             /*.modulus =*/kModulus59, /*.log_n =*/11, /*.log_t =*/10,
+            /*.variance =*/8},
+        RlweContext<MontgomeryInt<Uint64>>::Parameters{
+            /*.modulus =*/kModulus62, /*.log_n =*/11, /*.log_t =*/10,
             /*.variance =*/8},
     };
   }

@@ -16,6 +16,7 @@
 #ifndef RLWE_RNS_TESTING_PARAMETERS_H_
 #define RLWE_RNS_TESTING_PARAMETERS_H_
 
+#include <cmath>
 #include <vector>
 
 #include <gmock/gmock.h>
@@ -217,10 +218,10 @@ template <>
 inline std::vector<RnsParameters<ModularInt64>>
 GetRnsParametersForFiniteFieldEncoding<ModularInt64>() {
   return {
-      // A single main prime modulus: q0 = 40 bits.
+      // A single main prime modulus: q0 = 57 bits.
       // A single auxiliary prime modulus: p1 = 42 bits.
       RnsParameters<ModularInt64>{.log_n = 11,
-                                  .qs = {1095746727937ULL},
+                                  .qs = {144115188075835393ULL},
                                   .ps = {4398046486529ULL},
                                   .t = 40961,
                                   .log_gadget_base = 10},
@@ -409,6 +410,71 @@ GetBfvParametersForFiniteFieldEncoding<MontgomeryInt<absl::uint128>>() {
           .log_gadget_base = 10},
   };
 }
+#endif
+
+////////////////////////////////////////////////////////////////////////////////
+// CKKS parameters
+////////////////////////////////////////////////////////////////////////////////
+
+template <typename ModularInt>
+struct RnsCkksParameters {
+  int log_n;
+  std::vector<typename ModularInt::Int> qs;  // main prime moduli.
+  std::vector<typename ModularInt::Int> ps;  // auxiliary prime moduli.
+  int log_gadget_base;                       // Bit size of gadget base.
+  double scaling_factor;
+};
+
+template <typename ModularInt>
+std::vector<RnsCkksParameters<ModularInt>>
+GetCkksParametersForApproximateEncoding();
+
+template <>
+inline std::vector<RnsCkksParameters<ModularInt64>>
+GetCkksParametersForApproximateEncoding<ModularInt64>() {
+  return {
+      // One main prime modulus q0 = 28 bits, and one aux modulus p1 = 29 bits.
+      RnsCkksParameters<ModularInt64>{.log_n = 5,
+                                      .qs = {335552513ULL},
+                                      .ps = {536856577ULL},
+                                      .log_gadget_base = 5,
+                                      .scaling_factor = ldexp(1, 12)},
+
+      // One main prime modulus q0 = 50 bits, and one aux modulus p1 = 52 bits.
+      RnsCkksParameters<ModularInt64>{.log_n = 11,
+                                      .qs = {1125899906826241ULL},
+                                      .ps = {4503599627366401ULL},
+                                      .log_gadget_base = 5,
+                                      .scaling_factor = ldexp(1, 20)},
+
+      // Two main prime moduli: q0, q1 = 50 bits.
+      // Two aux moduli p1, p2 = 52 bits.
+      RnsCkksParameters<ModularInt64>{
+          .log_n = 11,
+          .qs = {1125899906826241ULL, 1125899906732033ULL},
+          .ps = {4503599627366401ULL, 4503599627149313ULL},
+          .log_gadget_base = 10,
+          .scaling_factor = ldexp(1, 30)},
+
+      // Five main prime moduli: q0,..,q4 = 52 bits.
+      // Three aux moduli p1, p2, p3 = 50 bits.
+      RnsCkksParameters<ModularInt64>{
+          .log_n = 11,
+          .qs = {4503599627149313ULL, 4503599627124737ULL, 4503599626924033ULL,
+                 4503599626838017ULL, 4503599626817537ULL},
+          .ps = {1125899906826241ULL, 1125899906732033ULL, 1125899906629633ULL},
+          .log_gadget_base = 10,
+          .scaling_factor = ldexp(1, 50)},
+  };
+}
+
+// The smallest integer type that is useful for CKKS encoding is uint64_t.
+#ifdef ABSL_HAVE_INTRINSIC_INT128
+typedef ::testing::Types<rlwe::MontgomeryInt<Uint64>>
+    ModularIntTypesForApproximateEncoding;
+#else
+typedef ::testing::Types<rlwe::MontgomeryInt<Uint64>>
+    ModularIntTypesForApproximateEncoding;
 #endif
 
 }  // namespace testing

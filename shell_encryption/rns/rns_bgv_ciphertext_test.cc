@@ -192,6 +192,19 @@ TYPED_TEST(RnsBgvCiphertextTest, HomomorphicAddition) {
     Integer expected = (messages0[i] + messages1[i]) % t;
     EXPECT_EQ(dec_sum_plaintext_messages[i], expected);
   }
+
+  // Create a trivial ciphertext (plaintext, 0), and use `AddInPlaceWithoutPad`.
+  RnsBgvCiphertext<TypeParam> ciphertext2({plaintext1}, this->main_moduli_,
+                                          /*power_of_s=*/1, /*error=*/0,
+                                          this->error_params_.get());
+  ASSERT_OK(ciphertext0.AddInPlaceWithoutPad(ciphertext2));
+  ASSERT_OK_AND_ASSIGN(std::vector<Integer> dec_sum_without_pad_messages,
+                       key.DecryptBgv(ciphertext0, encoder));
+  ASSERT_EQ(dec_sum_without_pad_messages.size(), num_coeffs);
+  for (int i = 0; i < num_coeffs; ++i) {
+    Integer expected = (messages0[i] + messages1[i]) % t;
+    EXPECT_EQ(dec_sum_without_pad_messages[i], expected);
+  }
 }
 
 TYPED_TEST(RnsBgvCiphertextTest, HomomorphicSubtraction) {
@@ -241,6 +254,19 @@ TYPED_TEST(RnsBgvCiphertextTest, HomomorphicSubtraction) {
   for (int i = 0; i < num_coeffs; ++i) {
     Integer expected = (t + messages0[i] - messages1[i]) % t;
     EXPECT_EQ(dec_diff_plaintext_messages[i], expected);
+  }
+
+  // Create a trivial ciphertext (plaintext, 0), and use `SubInPlaceWithoutPad`.
+  RnsBgvCiphertext<TypeParam> ciphertext2({plaintext1}, this->main_moduli_,
+                                          /*power_of_s=*/1, /*error=*/0,
+                                          this->error_params_.get());
+  ASSERT_OK(ciphertext0.SubInPlaceWithoutPad(ciphertext2));
+  ASSERT_OK_AND_ASSIGN(std::vector<Integer> dec_diff_without_pad_messages,
+                       key.DecryptBgv(ciphertext0, encoder));
+  ASSERT_EQ(dec_diff_without_pad_messages.size(), num_coeffs);
+  for (int i = 0; i < num_coeffs; ++i) {
+    Integer expected = (t + messages0[i] - messages1[i]) % t;
+    EXPECT_EQ(dec_diff_without_pad_messages[i], expected);
   }
 }
 

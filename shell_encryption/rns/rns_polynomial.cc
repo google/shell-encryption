@@ -54,6 +54,14 @@ absl::StatusOr<RnsPolynomial<ModularInt>> RnsPolynomial<ModularInt>::Create(
 }
 
 template <typename ModularInt>
+RnsPolynomial<ModularInt> RnsPolynomial<ModularInt>::CreateEmpty() {
+  int default_log_n = 0;
+  std::vector<std::vector<ModularInt>> coeff_vectors;
+  return RnsPolynomial(default_log_n, std::move(coeff_vectors),
+                       /*is_ntt=*/true);
+}
+
+template <typename ModularInt>
 absl::StatusOr<RnsPolynomial<ModularInt>> RnsPolynomial<ModularInt>::CreateZero(
     int log_n, absl::Span<const PrimeModulus<ModularInt>* const> moduli,
     bool is_ntt) {

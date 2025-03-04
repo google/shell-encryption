@@ -66,16 +66,29 @@ class DiscreteGaussianSampler {
   static constexpr Integer kNegativeThreshold =
       std::numeric_limits<Integer>::max() >> 1;
 
-  // Factory function that returns a discrete Gaussian sampler with the given
-  // standard deviation `s_base` for the base sampler.
+  // Factory function that returns a sampler for a discrete Gaussian with the
+  // given standard deviation `s`.
   static absl::StatusOr<std::unique_ptr<DiscreteGaussianSampler>> Create(
+      double s);
+
+  // Factory function that returns a generic discrete Gaussian sampler with the
+  // given standard deviation `s_base` for the base sampler, that can sample
+  // from a discrete Gaussian with an arbitrary standard deviation > `s_base`.
+  // Note: `s_base` must be at least sqrt(2) * kSmoothingParameter.
+  static absl::StatusOr<std::unique_ptr<DiscreteGaussianSampler>> CreateGeneric(
       double s_base);
+
+  // Returns a sample from the base distribution. The return value represents a
+  // negative number if it is larger than `kNegativeThreshold`.
+  absl::StatusOr<Integer> Sample(SecurePrng& prng) const;
 
   // Returns a sample from the discrete Gaussian distribution DG_s with center 0
   // and standard deviation `s`, where the randomness is drawn using the secure
   // pseudorandom generator `prng`. The return value represents negative number
   // if it is larger than `kNegativeThreshold`.
-  // Note: `s` must be at least `s_base`.
+  // Note: 1) `s` must be at least `s_base`.
+  //       2) If `s_base` < sqrt(2) * kSmoothingParameter, then the samples may
+  //          not follow the desired distribution.
   absl::StatusOr<Integer> Sample(double s, SecurePrng& prng) const {
     RLWE_ASSIGN_OR_RETURN(int num_iterations, NumIterations(s));
     return SampleWithIterations(s, num_iterations, prng);
@@ -99,13 +112,12 @@ class DiscreteGaussianSampler {
   // distribution to obtain a sample with the standard deviation `s`.
   absl::StatusOr<int> NumIterations(double s) const;
 
+  // Returns the base Gaussian parameter.
+  double BaseParameter() const { return s_base_; }
+
  private:
   explicit DiscreteGaussianSampler(double s_base, std::vector<Uint64> cdt)
       : s_base_(s_base), cdt_(std::move(cdt)) {}
-
-  // Returns a sample from the base distribution. The return value represents a
-  // negative number if it is larger than `kNegativeThreshold`.
-  absl::StatusOr<Integer> SampleBase(SecurePrng& prng) const;
 
   // Returns a sample from running i iterations of the arbitrary deviation
   // discrete Gaussian sampling algorithm SampleI.
