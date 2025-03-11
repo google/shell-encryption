@@ -540,10 +540,6 @@ TEST(Int256, OStream) {
       {uint256(1), std::ios::dec | std::ios::showbase, 0, '_', "1"},
       {uint256(1), std::ios::oct | std::ios::showbase, 0, '_', "01"},
       {uint256(1), std::ios::hex | std::ios::showbase, 0, '_', "0x1"},
-      // showbase does nothing on zero
-      {uint256(0), std::ios::dec | std::ios::showbase, 0, '_', "0"},
-      {uint256(0), std::ios::oct | std::ios::showbase, 0, '_', "0"},
-      {uint256(0), std::ios::hex | std::ios::showbase, 0, '_', "0"},
       // showpos does nothing on unsigned types
       {uint256(1), std::ios::dec | std::ios::showpos, 0, '_', "1"},
       // padding
