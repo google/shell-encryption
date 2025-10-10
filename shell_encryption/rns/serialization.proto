@@ -20,6 +20,8 @@ package rlwe;
 
 import "shell_encryption/serialization.proto";
 
+option optimize_for = LITE_RUNTIME;
+
 // RNS polynomial.
 message SerializedRnsPolynomial {
   // The log (base 2) of the number of coefficients.
