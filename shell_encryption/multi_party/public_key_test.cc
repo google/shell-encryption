@@ -184,7 +184,7 @@ TYPED_TEST(PublicKeyTest, Encrypt) {
   EXPECT_EQ(decrypted, messages);
 }
 
-TYPED_TEST(PublicKeyTest, EncryptExplicit) {
+TYPED_TEST(PublicKeyTest, EncryptExplicitNoWrapAround) {
   using Integer = typename TypeParam::Int;
 
   this->SetupSecretKeyShare();
@@ -202,9 +202,9 @@ TYPED_TEST(PublicKeyTest, EncryptExplicit) {
   auto r = RnsPolynomial<TypeParam>::CreateEmpty();
   auto e = RnsPolynomial<TypeParam>::CreateEmpty();
 
-  ASSERT_OK(public_key.EncryptExplicit(messages, this->encoder_.get(),
-                                       this->error_params_.get(),
-                                       this->prng_.get(), &b, &a, &r, &e));
+  ASSERT_OK(public_key.EncryptExplicit(
+      messages, this->encoder_.get(), this->error_params_.get(),
+      this->prng_.get(), &b, &a, &r, &e, /*wrap_around=*/nullptr));
 
   // Check that everything gets populated.
   EXPECT_EQ(b.NumCoeffs(), 1 << this->rns_context_->LogN());
@@ -219,6 +219,53 @@ TYPED_TEST(PublicKeyTest, EncryptExplicit) {
   EXPECT_EQ(e.NumCoeffs(), 1 << this->rns_context_->LogN());
   EXPECT_EQ(e.NumModuli(), this->rns_context_->NumMainPrimeModuli());
   EXPECT_TRUE(e.IsNttForm());
+
+  // Decrypt using the only secret key share.
+  ASSERT_OK(
+      b.FusedMulAddInPlace(a, this->secret_key_share_->Key(), this->moduli_));
+  ASSERT_OK_AND_ASSIGN(std::vector<Integer> decrypted,
+                       this->encoder_->DecodeBfv(b, this->moduli_));
+  EXPECT_EQ(decrypted, messages);
+}
+
+TYPED_TEST(PublicKeyTest, EncryptExplicitWrapAround) {
+  using Integer = typename TypeParam::Int;
+
+  this->SetupSecretKeyShare();
+  this->SetupPublicKeyShare();
+  ASSERT_OK_AND_ASSIGN(
+      PublicKey<TypeParam> public_key,
+      PublicKey<TypeParam>::Create(this->public_parameter_.get(),
+                                   {*this->public_key_share_.get()}));
+
+  int num_coeffs = 1 << this->rns_context_->LogN();
+  std::vector<Integer> messages = SampleMessages<Integer>(num_coeffs, 8);
+
+  auto b = RnsPolynomial<TypeParam>::CreateEmpty();
+  auto a = RnsPolynomial<TypeParam>::CreateEmpty();
+  auto r = RnsPolynomial<TypeParam>::CreateEmpty();
+  auto e = RnsPolynomial<TypeParam>::CreateEmpty();
+  auto wrap_around = RnsPolynomial<TypeParam>::CreateEmpty();
+
+  ASSERT_OK(public_key.EncryptExplicit(
+      messages, this->encoder_.get(), this->error_params_.get(),
+      this->prng_.get(), &b, &a, &r, &e, &wrap_around));
+
+  // Check that everything gets populated.
+  EXPECT_EQ(b.NumCoeffs(), 1 << this->rns_context_->LogN());
+  EXPECT_EQ(b.NumModuli(), this->rns_context_->NumMainPrimeModuli());
+  EXPECT_TRUE(b.IsNttForm());
+  EXPECT_EQ(a.NumCoeffs(), 1 << this->rns_context_->LogN());
+  EXPECT_EQ(a.NumModuli(), this->rns_context_->NumMainPrimeModuli());
+  EXPECT_TRUE(a.IsNttForm());
+  EXPECT_EQ(r.NumCoeffs(), 1 << this->rns_context_->LogN());
+  EXPECT_EQ(r.NumModuli(), this->rns_context_->NumMainPrimeModuli());
+  EXPECT_TRUE(r.IsNttForm());
+  EXPECT_EQ(e.NumCoeffs(), 1 << this->rns_context_->LogN());
+  EXPECT_EQ(e.NumModuli(), this->rns_context_->NumMainPrimeModuli());
+  EXPECT_TRUE(e.IsNttForm());
+  EXPECT_EQ(wrap_around.NumCoeffs(), 1 << this->rns_context_->LogN());
+  EXPECT_EQ(wrap_around.NumModuli(), this->rns_context_->NumMainPrimeModuli());
 
   // Decrypt using the only secret key share.
   ASSERT_OK(

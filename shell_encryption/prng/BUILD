@@ -12,11 +12,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+load("//third_party/bazel_rules/rules_cc/cc:cc_library.bzl", "cc_library")
+load("//third_party/bazel_rules/rules_cc/cc:cc_test.bzl", "cc_test")
+
 package(default_visibility = ["//visibility:public"])
 
 licenses(["notice"])
-
-exports_files(["LICENSE"])
 
 # PRNG interface.
 

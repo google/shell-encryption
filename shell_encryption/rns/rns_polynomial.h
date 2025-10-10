@@ -611,6 +611,11 @@ class RnsPolynomial {
   // Returns whether this polynomial is in the NTT form.
   bool IsNttForm() const { return is_ntt_; }
 
+  // Clones this polynomial.
+  RnsPolynomial Clone() const {
+    return RnsPolynomial(log_n_, coeff_vectors_, is_ntt_);
+  }
+
  private:
   explicit RnsPolynomial(int log_n,
                          std::vector<std::vector<ModularInt>> coeff_vectors,

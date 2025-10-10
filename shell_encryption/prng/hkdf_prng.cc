@@ -52,13 +52,13 @@ rlwe::StatusOr<std::unique_ptr<HkdfPrng>> HkdfPrng::Create(
 }
 
 rlwe::StatusOr<Uint8> HkdfPrng::Rand8() ABSL_LOCKS_EXCLUDED(mu_) {
-  absl::MutexLock lock(&mu_);
+  absl::MutexLock lock(mu_);
   return internal::HkdfPrngRand8(key_, &position_in_buffer_, &salt_counter_,
                                  &buffer_);
 }
 
 rlwe::StatusOr<Uint64> HkdfPrng::Rand64() ABSL_LOCKS_EXCLUDED(mu_) {
-  absl::MutexLock lock(&mu_);
+  absl::MutexLock lock(mu_);
   return internal::HkdfPrngRand64(key_, &position_in_buffer_, &salt_counter_,
                                   &buffer_);
 }

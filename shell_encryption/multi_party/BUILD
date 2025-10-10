@@ -16,6 +16,8 @@
 
 load("@rules_cc//cc:defs.bzl", "cc_library")
 load("@rules_proto//proto:defs.bzl", "proto_library")
+load("//third_party/bazel_rules/rules_cc/cc:cc_library.bzl", "cc_library")
+load("//third_party/bazel_rules/rules_cc/cc:cc_test.bzl", "cc_test")
 
 package(default_visibility = ["//visibility:public"])
 
@@ -81,6 +83,7 @@ cc_library(
     srcs = ["secret_key_share.cc"],
     hdrs = ["secret_key_share.h"],
     deps = [
+        ":polynomial_utilities",
         "//shell_encryption:integral_types",
         "//shell_encryption:montgomery",
         "//shell_encryption:statusor_fork",
@@ -123,6 +126,7 @@ cc_library(
     srcs = ["public_key_share.cc"],
     hdrs = ["public_key_share.h"],
     deps = [
+        ":polynomial_utilities",
         ":public_parameter",
         ":secret_key_share",
         "//shell_encryption:integral_types",
@@ -170,6 +174,7 @@ cc_library(
     srcs = ["public_key.cc"],
     hdrs = ["public_key.h"],
     deps = [
+        ":polynomial_utilities",
         ":public_key_share",
         ":public_parameter",
         "//shell_encryption:integral_types",
@@ -194,6 +199,7 @@ cc_test(
     size = "small",
     srcs = ["public_key_test.cc"],
     deps = [
+        ":polynomial_utilities",
         ":public_key",
         ":public_key_share",
         ":public_parameter",
@@ -242,6 +248,8 @@ cc_test(
         ":recovery",
         ":secret_key_share",
         "//shell_encryption/multi_party/testing:parameters",
+        "//shell_encryption/prng:single_thread_chacha_prng",
+        "//shell_encryption/prng:single_thread_hkdf_prng",
         "//shell_encryption/rns:coefficient_encoder",
         "//shell_encryption/rns:rns_bfv_ciphertext",
         "//shell_encryption/rns:rns_context",
@@ -256,6 +264,19 @@ cc_test(
         "@com_github_google_googletest//:gtest_main",
         "@com_google_absl//absl/log:check",
         "@com_google_absl//absl/status",
-        "@com_google_absl//absl/strings",
+    ],
+)
+
+cc_library(
+    name = "polynomial_utilities",
+    hdrs = ["polynomial_utilities.h"],
+    visibility = ["//visibility:private"],
+    deps = [
+        "//shell_encryption:statusor_fork",
+        "//shell_encryption/rns:rns_context",
+        "//shell_encryption/rns:rns_modulus",
+        "//shell_encryption/rns:rns_polynomial",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/types:span",
     ],
 )
