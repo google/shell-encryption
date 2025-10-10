@@ -19,6 +19,8 @@ package rlwe;
 import "shell_encryption/serialization.proto";
 import "shell_encryption/rns/serialization.proto";
 
+option optimize_for = LITE_RUNTIME;
+
 // Public parameter.
 message SerializedPublicParameter {
   // Seed used to generate the random polynomial "a" in the public parameter.

@@ -18,6 +18,7 @@ syntax = "proto2";
 package rlwe;
 
 option go_package = "github.com/google/shell-encryption";
+option optimize_for = LITE_RUNTIME;
 
 // NTT Polynomial
 message SerializedNttPolynomial {
