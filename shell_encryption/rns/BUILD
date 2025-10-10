@@ -14,10 +14,9 @@
 
 # RNS extension of the rlwe library
 
-load("@rules_cc//cc:defs.bzl", "cc_library")
 load("@rules_proto//proto:defs.bzl", "proto_library")
-load("//third_party/bazel_rules/rules_cc/cc:cc_library.bzl", "cc_library")
-load("//third_party/bazel_rules/rules_cc/cc:cc_test.bzl", "cc_test")
+load("@rules_cc//cc:cc_library.bzl", "cc_library")
+load("@rules_cc//cc:cc_test.bzl", "cc_test")
 
 package(default_visibility = ["//visibility:public"])
 
@@ -233,6 +232,7 @@ cc_library(
     deps = [
         "//shell_encryption:int256",
         "//shell_encryption:integral_types",
+        "@com_google_absl//absl/types:span",
     ],
 )
 
