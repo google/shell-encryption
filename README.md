@@ -55,7 +55,7 @@ The cryptosystem works as follows.
 
 ### Preliminaries
 
-Each object in the cryptosystem, including keys, messages, and ciphertexts, are
+Each object in the cryptosystems, including keys, messages, and ciphertexts, are
 made of polynomials. Each of these polynomials has degree *n-1*, where *n* is a
 power of 2. In other words, each of these polynomials has *n* coefficients.
 
@@ -67,7 +67,7 @@ We also need a modulus *t* that is much smaller than *q*. *log(t)* is the number
 of bits of plaintext information we are able to fit into each coefficient of a
 ciphertext polynomial. The importance of *t* will become apparent soon.
 
-Finally, we need one other component: a binomial distribution *Y* with mean 0
+Finally, we need two other components: a binomial distribution *Y* with mean 0
 and standard deviation *w*, where *w* is a parameter of the cryptosystem. The
 importance of this distribution will become apparent soon.
 
@@ -84,8 +84,8 @@ coefficients, each of which is smaller than *t*.
 To encrypt *m* with key *s*, select a polynomial *e* from the distribution *Y*
 and a polynomial *a* from the uniform distribution (each coefficient of *a* is
 chosen uniformly at random). *e* is a random amount of error that makes it
-difficult to extract the key from the ciphertext. Both *a* and *e* should be
-regenerated freshly for each encryption.
+difficult to extract the error from the ciphertext. Both *a* and *e* are nonces
+that should be regenerated freshly for each encryption.
 
 The ciphertext consists of two polynomials. The first polynomial
 *c<sub>0</sub> = as + m + et*. The second polynomial *c<sub>1</sub> = -a*. The

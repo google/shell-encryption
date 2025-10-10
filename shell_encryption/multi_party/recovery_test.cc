@@ -173,7 +173,8 @@ TYPED_TEST(RecoverTest, RecoverSucceeds) {
     ASSERT_OK_AND_ASSIGN(
         auto partial_decryption,
         secret_key_shares[i].PartialDecrypt(
-            component_a, s_flood, dg_sampler.get(), this->prng_.get()));
+            component_a, s_flood, dg_sampler.get(), this->prng_.get(),
+            /*error_flood=*/nullptr, /*wrap_around=*/nullptr));
     partial_decryptions.push_back(std::move(partial_decryption));
   }
 

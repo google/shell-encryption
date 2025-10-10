@@ -37,7 +37,10 @@ std::vector<std::vector<BigInteger>> PackMessages(
 
   std::vector<BigInteger> packed_messages;
   packed_messages.reserve(num_coeffs);
-  Integer packed_message{0};
+  // Each packed_message is a base-packing_base value with messages as digits,
+  // i.e. packed_message = sum(messages[k * j + i] * B^(k - 1 - i), i=0..k-1),
+  // for k = num_packing.
+  BigInteger packed_message = 0;
   int packing_idx = 0;
   for (int i = 0; i < messages.size(); ++i) {
     Integer x = messages[i];

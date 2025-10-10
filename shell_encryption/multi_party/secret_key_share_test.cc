@@ -89,7 +89,8 @@ TEST_F(SecretKeyShareNegativeTest, PartialDecryptFailsIfGaussianSamplerIsNull) {
   ASSERT_OK_AND_ASSIGN(auto ct, RnsPolynomial<ModularInt32>::CreateZero(
                                     this->rns_context_->LogN(), this->moduli_));
   EXPECT_THAT(secret_key_share.PartialDecrypt(
-                  ct, kSFlood, /*dg_sampler=*/nullptr, this->prng_.get()),
+                  ct, kSFlood, /*dg_sampler=*/nullptr, this->prng_.get(), /*error_flood=*/nullptr,
+                  /*wraparound=*/nullptr),
               StatusIs(absl::StatusCode::kInvalidArgument,
                        HasSubstr("`dg_sampler` must not be null")));
 }
@@ -103,10 +104,12 @@ TEST_F(SecretKeyShareNegativeTest, PartialDecryptFailsIfPrngIsNull) {
   ASSERT_OK_AND_ASSIGN(
       auto dg_sampler,
       DiscreteGaussianSampler<ModularInt32::Int>::Create(kSBase));
-  EXPECT_THAT(secret_key_share.PartialDecrypt(ct, kSFlood, dg_sampler.get(),
-                                              /*prng=*/nullptr),
-              StatusIs(absl::StatusCode::kInvalidArgument,
-                       HasSubstr("`prng` must not be null")));
+  EXPECT_THAT(
+      secret_key_share.PartialDecrypt(ct, kSFlood, dg_sampler.get(),
+                                      /*prng=*/nullptr, /*error_flood=*/nullptr,
+                                      /*wraparound=*/nullptr),
+      StatusIs(absl::StatusCode::kInvalidArgument,
+               HasSubstr("`prng` must not be null")));
 }
 
 TYPED_TEST(SecretKeyShareTest, SampleSuccess) {

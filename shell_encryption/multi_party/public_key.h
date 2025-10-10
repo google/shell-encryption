@@ -21,6 +21,7 @@
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/types/span.h"
+#include "shell_encryption/multi_party/polynomial_utilities.h"
 #include "shell_encryption/multi_party/public_key_share.h"
 #include "shell_encryption/multi_party/public_parameter.h"
 #include "shell_encryption/prng/prng.h"
@@ -86,7 +87,8 @@ class PublicKey {
       SecurePrng* prng, RnsPolynomial<ModularInt>* ciphertext_component_b,
       RnsPolynomial<ModularInt>* ciphertext_component_a,
       RnsPolynomial<ModularInt>* ciphertext_secret_r,
-      RnsPolynomial<ModularInt>* ciphertext_error_e) const;
+      RnsPolynomial<ModularInt>* ciphertext_error_e,
+      RnsPolynomial<ModularInt>* wrap_around) const;
 
   // Accessor to the "b" component in a public key.
   const RnsPolynomial<ModularInt>& ComponentB() const { return key_b_; }
@@ -115,7 +117,7 @@ absl::StatusOr<RnsBfvCiphertext<ModularInt>> PublicKey<ModularInt>::Encrypt(
   RLWE_RETURN_IF_ERROR(EncryptExplicit(
       messages, encoder, error_params, prng, &ciphertext_component_b,
       &ciphertext_component_a, /*ciphertext_secret_r=*/nullptr,
-      /*ciphertext_error_e=*/nullptr));
+      /*ciphertext_error_e=*/nullptr, /*wrap_around=*/nullptr));
 
   auto moduli = public_parameter_->Moduli();
   std::vector<const PrimeModulus<ModularInt>*> moduli_vector;
@@ -136,7 +138,8 @@ absl::Status PublicKey<ModularInt>::EncryptExplicit(
     RnsPolynomial<ModularInt>* ciphertext_component_b,
     RnsPolynomial<ModularInt>* ciphertext_component_a,
     RnsPolynomial<ModularInt>* ciphertext_secret_r,
-    RnsPolynomial<ModularInt>* ciphertext_error_e) const {
+    RnsPolynomial<ModularInt>* ciphertext_error_e,
+    RnsPolynomial<ModularInt>* wrap_around) const {
   if (encoder == nullptr) {
     return absl::InvalidArgumentError("`encoder` must not be null.");
   }
@@ -190,9 +193,22 @@ absl::Status PublicKey<ModularInt>::EncryptExplicit(
     *ciphertext_error_e = *ciphertext_component_a;
   }
 
+  // ar = a * r.
+  RLWE_ASSIGN_OR_RETURN(
+      RnsPolynomial<ModularInt> ar,
+      public_parameter_->PublicKeyComponentA().Mul(r, moduli));
+
   // c1 = a * r + e''.
-  RLWE_RETURN_IF_ERROR(ciphertext_component_a->FusedMulAddInPlace(
-      public_parameter_->PublicKeyComponentA(), r, moduli));
+  RLWE_RETURN_IF_ERROR((*ciphertext_component_a).AddInPlace(ar, moduli));
+
+  // Optionally save wraparound such that
+  // c1 = a * r + e'' + wraparound * (X^N + 1) over Z_Q[X].
+  if (wrap_around != nullptr) {
+    RLWE_ASSIGN_OR_RETURN(
+        *wrap_around,
+        rlwe_internal::QuotientOf(public_parameter_->PublicKeyComponentA(), r,
+                                  ar, moduli));
+  }
 
   return absl::OkStatus();
 }

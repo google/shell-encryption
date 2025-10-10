@@ -52,13 +52,13 @@ rlwe::StatusOr<std::unique_ptr<ChaChaPrng>> ChaChaPrng::Create(
 }
 
 rlwe::StatusOr<Uint8> ChaChaPrng::Rand8() ABSL_LOCKS_EXCLUDED(mu_) {
-  absl::MutexLock lock(&mu_);
+  absl::MutexLock lock(mu_);
   return internal::ChaChaPrngRand8(key_, &position_in_buffer_, &salt_counter_,
                                    &buffer_);
 }
 
 rlwe::StatusOr<Uint64> ChaChaPrng::Rand64() ABSL_LOCKS_EXCLUDED(mu_) {
-  absl::MutexLock lock(&mu_);
+  absl::MutexLock lock(mu_);
   return internal::ChaChaPrngRand64(key_, &position_in_buffer_, &salt_counter_,
                                     &buffer_);
 }

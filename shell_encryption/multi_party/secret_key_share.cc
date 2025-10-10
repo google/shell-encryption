@@ -20,8 +20,10 @@
 #include "absl/numeric/int128.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
+#include "absl/types/span.h"
 #include "shell_encryption/integral_types.h"
 #include "shell_encryption/montgomery.h"
+#include "shell_encryption/multi_party/polynomial_utilities.h"
 #include "shell_encryption/prng/prng.h"
 #include "shell_encryption/rns/error_distribution.h"
 #include "shell_encryption/rns/rns_context.h"
@@ -56,8 +58,9 @@ template <typename ModularInt>
 absl::StatusOr<RnsPolynomial<ModularInt>>
 SecretKeyShare<ModularInt>::PartialDecrypt(
     const RnsPolynomial<ModularInt>& ciphertext_component_a, double s_flood,
-    const DiscreteGaussianSampler<Integer>* dg_sampler,
-    SecurePrng* prng) const {
+    const DiscreteGaussianSampler<Integer>* dg_sampler, SecurePrng* prng,
+    RnsPolynomial<ModularInt>* error_flood,
+    RnsPolynomial<ModularInt>* wrap_around) const {
   if (dg_sampler == nullptr) {
     return absl::InvalidArgumentError("`dg_sampler` must not be null.");
   }
@@ -65,20 +68,37 @@ SecretKeyShare<ModularInt>::PartialDecrypt(
     return absl::InvalidArgumentError("`prng` must not be null.");
   }
 
-  // Compute partial decryption d = s * ciphertext_component_a + e_flood.
-  RnsPolynomial<ModularInt> d = ciphertext_component_a;
+  // Sample e_flood.
+  RLWE_ASSIGN_OR_RETURN(RnsPolynomial<ModularInt> d,
+                        SampleDiscreteGaussian<ModularInt>(
+                            LogN(), s_flood, moduli_, dg_sampler, prng));
+  if (error_flood != nullptr) {
+    *error_flood = d;
+  }
+
   if (!d.IsNttForm()) {
     RLWE_RETURN_IF_ERROR(d.ConvertToNttForm(moduli_));
   }
-  RLWE_RETURN_IF_ERROR(d.MulInPlace(key_, moduli_));
 
-  RLWE_ASSIGN_OR_RETURN(RnsPolynomial<ModularInt> e_flood,
-                        SampleDiscreteGaussian<ModularInt>(
-                            LogN(), s_flood, moduli_, dg_sampler, prng));
-  if (!e_flood.IsNttForm()) {
-    RLWE_RETURN_IF_ERROR(e_flood.ConvertToNttForm(moduli_));
+  RnsPolynomial<ModularInt> c1 = ciphertext_component_a;
+  if (!c1.IsNttForm()) {
+    RLWE_RETURN_IF_ERROR(c1.ConvertToNttForm(moduli_));
   }
-  RLWE_RETURN_IF_ERROR(d.AddInPlace(e_flood, moduli_));
+
+  // c1s = c1 * s.
+  RLWE_ASSIGN_OR_RETURN(RnsPolynomial<ModularInt> c1s, c1.Mul(key_, moduli_));
+
+  // d = c1 * s + e_flood.
+  RLWE_RETURN_IF_ERROR(d.AddInPlace(c1s, moduli_));
+
+  // Optionally save wraparound such that
+  // d = c1 * s + e_flood + wraparound * (X^N + 1) over Z_Q[X].
+  if (wrap_around != nullptr) {
+    RLWE_ASSIGN_OR_RETURN(
+        *wrap_around,
+        rlwe_internal::QuotientOf(c1, key_, c1s, absl::MakeSpan(moduli_)));
+  }
+
   return d;
 }
 

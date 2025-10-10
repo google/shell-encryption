@@ -28,9 +28,10 @@ using Integer = uint64_t;
 using BigInteger = uint256;
 
 TEST(PackingTest, PackU64Integers) {
+  constexpr Integer input_domain = 10;
+
   int num_packing = 3;
   int num_coeffs = 4;
-  Integer input_domain = 10;
 
   std::vector<Integer> input_values;
   std::vector<std::vector<BigInteger>> packed_messages;
@@ -102,9 +103,9 @@ TEST(PackingTest, UnpackU64Integers) {
 }
 
 TEST(PackingTest, PackUnpackU64Integers) {
-  int num_packing = 3;
-  int num_coeffs = 4;
-  Integer input_domain = 10;
+  constexpr int num_packing = 3;
+  constexpr int num_coeffs = 4;
+  constexpr Integer input_domain = 10;
 
   std::vector<Integer> input_values;
   std::vector<std::vector<BigInteger>> packed_messages;
@@ -124,7 +125,7 @@ TEST(PackingTest, PackUnpackU256Integers) {
   constexpr int num_packing = 8;
   constexpr int num_coeffs = 50;
   constexpr int num_messages = 30;
-  constexpr uint64_t input_domain = 8;
+  constexpr Integer input_domain = 8;
 
   std::vector<Integer> input_vec = {2, 2, 4, 7, 4, 0, 0, 1, 4, 3,
                                     5, 3, 4, 5, 4, 4, 4, 3, 3, 2,
@@ -139,6 +140,37 @@ TEST(PackingTest, PackUnpackU256Integers) {
 
   EXPECT_EQ(absl::MakeSpan(unpacked_messages).subspan(0, num_messages),
             absl::MakeSpan(input_vec).subspan(0, num_messages));
+}
+
+TEST(PackingTest, PackWithLargePackingBase) {
+  constexpr Integer input_domain = 1ULL << 50;
+  constexpr int num_coeffs = 50;
+  constexpr int num_messages = 30;
+
+  std::vector<Integer> input = {2, 2, 4, 7, 4, 0, 0, 1, 4, 3, 5, 3, 4, 5, 4,
+                                4, 4, 3, 3, 2, 2, 0, 1, 3, 1, 5, 2, 2, 2, 0};
+
+  std::vector<std::vector<BigInteger>> packed =
+      rlwe::PackMessages<Integer, BigInteger>(input, input_domain,
+                                              /*num_packing=*/1, num_coeffs);
+  std::vector<Integer> unpacked =
+      rlwe::UnpackMessages(packed, input_domain, /*num_packing=*/1);
+  EXPECT_EQ(absl::MakeSpan(unpacked).subspan(0, num_messages),
+            absl::MakeSpan(input).subspan(0, num_messages));
+
+  packed =
+      rlwe::PackMessages<Integer, BigInteger>(input, input_domain,
+                                              /*num_packing=*/2, num_coeffs);
+  unpacked = rlwe::UnpackMessages(packed, input_domain, /*num_packing=*/2);
+  EXPECT_EQ(absl::MakeSpan(unpacked).subspan(0, num_messages),
+            absl::MakeSpan(input).subspan(0, num_messages));
+
+  packed =
+      rlwe::PackMessages<Integer, BigInteger>(input, input_domain,
+                                              /*num_packing=*/3, num_coeffs);
+  unpacked = rlwe::UnpackMessages(packed, input_domain, /*num_packing=*/3);
+  EXPECT_EQ(absl::MakeSpan(unpacked).subspan(0, num_messages),
+            absl::MakeSpan(input).subspan(0, num_messages));
 }
 
 }  // namespace

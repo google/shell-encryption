@@ -47,8 +47,9 @@ class SecretKeyShare {
   // holder, for a ciphertext whose "a" component is given.
   absl::StatusOr<RnsPolynomial<ModularInt>> PartialDecrypt(
       const RnsPolynomial<ModularInt>& ciphertext_component_a, double s_flood,
-      const DiscreteGaussianSampler<Integer>* dg_sampler,
-      SecurePrng* prng) const;
+      const DiscreteGaussianSampler<Integer>* dg_sampler, SecurePrng* prng,
+      RnsPolynomial<ModularInt>* error_flood,
+      RnsPolynomial<ModularInt>* wrap_around) const;
 
   // Accessors
   int LogN() const { return key_.LogN(); }
