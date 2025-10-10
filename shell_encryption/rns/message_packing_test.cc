@@ -17,6 +17,7 @@
 #include <cstdint>
 #include <vector>
 
+#include <gmock/gmock.h>
 #include <gtest/gtest.h>
 #include "absl/types/span.h"
 #include "shell_encryption/int256.h"
@@ -29,7 +30,6 @@ using BigInteger = uint256;
 
 TEST(PackingTest, PackU64Integers) {
   constexpr Integer input_domain = 10;
-
   int num_packing = 3;
   int num_coeffs = 4;
 
@@ -40,13 +40,19 @@ TEST(PackingTest, PackU64Integers) {
   input_values = {1, 2, 3, 4, 5, 6, 7, 8};
   packed_messages = PackMessages<Integer, BigInteger>(
       input_values, input_domain, num_packing, num_coeffs);
-  expected_packed_messages = {{123, 456, 780}};
+  expected_packed_messages = {{321, 654, 87, 0}};
   EXPECT_EQ(packed_messages, expected_packed_messages);
 
   input_values = {1, 2, 3, 4, 5, 6, 7, 8, 9};
   packed_messages = PackMessages<Integer, BigInteger>(
       input_values, input_domain, num_packing, num_coeffs);
-  expected_packed_messages = {{123, 456, 789}};
+  expected_packed_messages = {{321, 654, 987, 0}};
+  EXPECT_EQ(packed_messages, expected_packed_messages);
+
+  input_values = {1, 2, 3, 4, 5, 6, 7, 8, 9, 8, 7};
+  packed_messages = PackMessages<Integer, BigInteger>(
+      input_values, input_domain, num_packing, num_coeffs);
+  expected_packed_messages = {{321, 654, 987, 78}};
   EXPECT_EQ(packed_messages, expected_packed_messages);
 
   input_values = {};
@@ -58,7 +64,7 @@ TEST(PackingTest, PackU64Integers) {
   input_values = {0};
   packed_messages = PackMessages<Integer, BigInteger>(
       input_values, input_domain, num_packing, num_coeffs);
-  expected_packed_messages = {{0}};
+  expected_packed_messages = {{0, 0, 0, 0}};
   EXPECT_EQ(packed_messages, expected_packed_messages);
 
   num_packing = 1;
@@ -74,7 +80,7 @@ TEST(PackingTest, PackU64Integers) {
   input_values = {1, 2, 3};
   packed_messages = PackMessages<Integer, BigInteger>(
       input_values, input_domain, num_packing, num_coeffs);
-  expected_packed_messages = {{1, 2}, {3}};
+  expected_packed_messages = {{1, 2}, {3, 0}};
   EXPECT_EQ(packed_messages, expected_packed_messages);
 }
 
@@ -86,7 +92,7 @@ TEST(PackingTest, UnpackU64Integers) {
   std::vector<Integer> unpacked_messages;
   std::vector<Integer> expected_unpacked_messages;
 
-  packed_messages = {{401, 321}, {450}};
+  packed_messages = {{104, 123}, {54}};
   unpacked_messages =
       UnpackMessages(packed_messages, input_domain, num_packing);
   expected_unpacked_messages = {4, 0, 1, 3, 2, 1, 4, 5, 0};
@@ -95,7 +101,7 @@ TEST(PackingTest, UnpackU64Integers) {
   num_packing = 2;
   input_domain = 2;
 
-  packed_messages = {{1, 2}, {0, 3}};
+  packed_messages = {{2, 1}, {0, 3}};
   unpacked_messages =
       UnpackMessages(packed_messages, input_domain, num_packing);
   expected_unpacked_messages = {0, 1, 1, 0, 0, 0, 1, 1};
@@ -114,7 +120,10 @@ TEST(PackingTest, PackUnpackU64Integers) {
       input_values, input_domain, num_packing, num_coeffs);
   std::vector<Integer> unpacked_values =
       UnpackMessages(packed_messages, input_domain, num_packing);
-  EXPECT_EQ(unpacked_values, input_values);
+  EXPECT_EQ(absl::MakeSpan(unpacked_values).subspan(0, input_values.size()),
+            absl::MakeSpan(input_values));
+  EXPECT_THAT(absl::MakeSpan(unpacked_values).subspan(input_values.size()),
+              testing::Each(testing::Eq(0)));
 
   input_values = {1, 2, 3, 4, 5, 6, 7, 8};
   unpacked_values = UnpackMessages(packed_messages, input_domain, num_packing);
@@ -171,6 +180,25 @@ TEST(PackingTest, PackWithLargePackingBase) {
   unpacked = rlwe::UnpackMessages(packed, input_domain, /*num_packing=*/3);
   EXPECT_EQ(absl::MakeSpan(unpacked).subspan(0, num_messages),
             absl::MakeSpan(input).subspan(0, num_messages));
+}
+
+TEST(PackingTest, PackUnpackFlatU256Integers) {
+  constexpr int num_packing = 8;
+  constexpr int num_messages = 30;
+  constexpr Integer input_domain = 8;
+
+  std::vector<Integer> input_vec = {2, 2, 4, 7, 4, 0, 0, 1, 4, 3,
+                                    5, 3, 4, 5, 4, 4, 4, 3, 3, 2,
+                                    2, 0, 1, 3, 1, 5, 2, 2, 2, 0};
+
+  std::vector<BigInteger> packed_messages =
+      rlwe::PackMessagesFlat<Integer, BigInteger>(input_vec, input_domain,
+                                                  num_packing);
+  std::vector<Integer> unpacked_messages =
+      rlwe::UnpackMessagesFlat<Integer, BigInteger>(packed_messages,
+                                                    input_domain, num_packing);
+  EXPECT_EQ(absl::MakeSpan(unpacked_messages).subspan(0, num_messages),
+            absl::MakeSpan(input_vec).subspan(0, num_messages));
 }
 
 }  // namespace
