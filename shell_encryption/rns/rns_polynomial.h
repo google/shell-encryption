@@ -151,7 +151,7 @@ class RnsPolynomial {
   absl::StatusOr<RnsPolynomial> Negate(
       absl::Span<const PrimeModulus<ModularInt>* const> moduli) const {
     RnsPolynomial output = *this;
-    output.NegateInPlace(moduli);
+    std::ignore = output.NegateInPlace(moduli);
     return output;
   }
 
