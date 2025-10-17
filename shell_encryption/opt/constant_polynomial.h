@@ -48,7 +48,7 @@ class ConstantPolynomial {
   }
 
   // Get the length.
-  const size_t Len() const { return coeffs_constant_.size(); }
+  size_t Len() const { return coeffs_constant_.size(); }
 
  private:
   // Private constructor.
