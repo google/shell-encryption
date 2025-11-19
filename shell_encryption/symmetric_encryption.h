@@ -764,9 +764,9 @@ class SymmetricRlweKey {
   const typename ModularInt::Params* ModulusParams() const {
     return modulus_params_;
   }
-  unsigned int BitsPerCoeff() const { return log_t_; }
-  Uint64 Variance() const { return variance_; }
-  unsigned int LogT() const { return log_t_; }
+  const unsigned int BitsPerCoeff() const { return log_t_; }
+  const Uint64 Variance() const { return variance_; }
+  const unsigned int LogT() const { return log_t_; }
   const ModularInt& PlaintextModulus() const { return t_mod_; }
   const typename ModularInt::Params* PlaintextModulusParams() const {
     return plaintext_modulus_params_;

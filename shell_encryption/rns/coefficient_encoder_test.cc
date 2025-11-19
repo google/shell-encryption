@@ -130,6 +130,7 @@ TYPED_TEST(CoefficientEncoderNegativeTest, EncodeBgvFailsIfEmptyModuli) {
 
 TYPED_TEST(CoefficientEncoderNegativeTest,
            DecodeBgvFailsIfWrongNumberOfModuli) {
+  using Integer = typename TypeParam::Int;
   ASSERT_OK_AND_ASSIGN(auto encoder, CoefficientEncoder<TypeParam>::Create(
                                          this->rns_context_.get()));
   ASSERT_OK_AND_ASSIGN(auto zero,

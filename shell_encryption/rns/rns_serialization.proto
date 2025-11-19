@@ -20,7 +20,8 @@ package rlwe;
 
 import "shell_encryption/serialization.proto";
 
-option optimize_for = LITE_RUNTIME;
+option java_multiple_files = true;
+option java_outer_classname = "RnsSerialization";
 
 // RNS polynomial.
 message SerializedRnsPolynomial {
