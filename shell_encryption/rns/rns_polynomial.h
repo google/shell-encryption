@@ -26,7 +26,7 @@
 #include "shell_encryption/polynomial.h"
 #include "shell_encryption/rns/rns_integer.h"
 #include "shell_encryption/rns/rns_modulus.h"
-#include "shell_encryption/rns/serialization.pb.h"
+#include "shell_encryption/rns/rns_serialization.pb.h"
 #include "shell_encryption/status_macros.h"
 
 namespace rlwe {
@@ -151,7 +151,7 @@ class RnsPolynomial {
   absl::StatusOr<RnsPolynomial> Negate(
       absl::Span<const PrimeModulus<ModularInt>* const> moduli) const {
     RnsPolynomial output = *this;
-    std::ignore = output.NegateInPlace(moduli);
+    output.NegateInPlace(moduli);
     return output;
   }
 

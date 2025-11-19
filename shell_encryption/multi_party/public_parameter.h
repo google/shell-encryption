@@ -23,7 +23,7 @@
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/types/span.h"
-#include "shell_encryption/multi_party/serialization.pb.h"
+#include "shell_encryption/multi_party/mp_serialization.pb.h"
 #include "shell_encryption/prng/prng.h"
 #include "shell_encryption/rns/rns_context.h"
 #include "shell_encryption/rns/rns_modulus.h"

@@ -26,7 +26,7 @@
 #include "shell_encryption/rns/lazy_rns_polynomial.h"
 #include "shell_encryption/rns/rns_error_params.h"
 #include "shell_encryption/rns/rns_polynomial.h"
-#include "shell_encryption/rns/serialization.pb.h"
+#include "shell_encryption/rns/rns_serialization.pb.h"
 #include "shell_encryption/status_macros.h"
 
 namespace rlwe {

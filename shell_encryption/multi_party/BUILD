@@ -21,17 +21,17 @@ load("@rules_cc//cc:cc_test.bzl", "cc_test")
 package(default_visibility = ["//visibility:public"])
 
 proto_library(
-    name = "serialization_proto",
-    srcs = ["serialization.proto"],
+    name = "mp_serialization_proto",
+    srcs = ["mp_serialization.proto"],
     deps = [
         "//shell_encryption:serialization_proto",
-        "//shell_encryption/rns:serialization_proto",
+        "//shell_encryption/rns:rns_serialization_proto",
     ],
 )
 
 cc_proto_library(
-    name = "serialization_cc_proto",
-    deps = [":serialization_proto"],
+    name = "mp_serialization_cc_proto",
+    deps = [":mp_serialization_proto"],
 )
 
 # Public randomness.
@@ -40,7 +40,7 @@ cc_library(
     srcs = ["public_parameter.cc"],
     hdrs = ["public_parameter.h"],
     deps = [
-        ":serialization_cc_proto",
+        ":mp_serialization_cc_proto",
         "//shell_encryption:integral_types",
         "//shell_encryption:montgomery",
         "//shell_encryption:statusor_fork",

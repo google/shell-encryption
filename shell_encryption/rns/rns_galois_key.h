@@ -30,7 +30,7 @@
 #include "shell_encryption/rns/rns_modulus.h"
 #include "shell_encryption/rns/rns_polynomial.h"
 #include "shell_encryption/rns/rns_secret_key.h"
-#include "shell_encryption/rns/serialization.pb.h"
+#include "shell_encryption/rns/rns_serialization.pb.h"
 #include "shell_encryption/status_macros.h"
 
 namespace rlwe {

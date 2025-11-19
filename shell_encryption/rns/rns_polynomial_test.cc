@@ -33,7 +33,7 @@
 #include "shell_encryption/rns/crt_interpolation.h"
 #include "shell_encryption/rns/rns_context.h"
 #include "shell_encryption/rns/rns_modulus.h"
-#include "shell_encryption/rns/serialization.pb.h"
+#include "shell_encryption/rns/rns_serialization.pb.h"
 #include "shell_encryption/rns/testing/parameters.h"
 #include "shell_encryption/rns/testing/testing_utils.h"
 #include "shell_encryption/status_macros.h"

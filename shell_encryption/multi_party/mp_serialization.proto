@@ -17,9 +17,10 @@ syntax = "proto2";
 package rlwe;
 
 import "shell_encryption/serialization.proto";
-import "shell_encryption/rns/serialization.proto";
+import "shell_encryption/rns/rns_serialization.proto";
 
-option optimize_for = LITE_RUNTIME;
+option java_multiple_files = true;
+option java_outer_classname = "MpSerialization";
 
 // Public parameter.
 message SerializedPublicParameter {

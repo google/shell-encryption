@@ -17,18 +17,24 @@
 load("@rules_proto//proto:defs.bzl", "proto_library")
 load("@rules_cc//cc:cc_library.bzl", "cc_library")
 load("@rules_cc//cc:cc_test.bzl", "cc_test")
+load("@rules_rust_protobuf//:defs.bzl", "rust_proto_library")
 
 package(default_visibility = ["//visibility:public"])
 
 proto_library(
-    name = "serialization_proto",
-    srcs = ["serialization.proto"],
+    name = "rns_serialization_proto",
+    srcs = ["rns_serialization.proto"],
     deps = ["//shell_encryption:serialization_proto"],
 )
 
 cc_proto_library(
-    name = "serialization_cc_proto",
-    deps = [":serialization_proto"],
+    name = "rns_serialization_cc_proto",
+    deps = [":rns_serialization_proto"],
+)
+
+rust_proto_library(
+    name = "rns_serialization_rust_proto",
+    deps = [":rns_serialization_proto"],
 )
 
 # RNS integer.
@@ -95,7 +101,7 @@ cc_library(
     deps = [
         ":rns_integer",
         ":rns_modulus",
-        ":serialization_cc_proto",
+        ":rns_serialization_cc_proto",
         "//shell_encryption:dft_transformations",
         "//shell_encryption:modulus_conversion",
         "//shell_encryption:montgomery",
@@ -116,7 +122,7 @@ cc_test(
         ":rns_context",
         ":rns_modulus",
         ":rns_polynomial",
-        ":serialization_cc_proto",
+        ":rns_serialization_cc_proto",
         "//shell_encryption:integral_types",
         "//shell_encryption:montgomery",
         "//shell_encryption:polynomial",
@@ -389,7 +395,7 @@ cc_library(
         ":lazy_rns_polynomial",
         ":rns_error_params",
         ":rns_polynomial",
-        ":serialization_cc_proto",
+        ":rns_serialization_cc_proto",
         "//shell_encryption:integral_types",
         "//shell_encryption:montgomery",
         "//shell_encryption:statusor_fork",
@@ -412,7 +418,7 @@ cc_test(
         ":rns_modulus",
         ":rns_polynomial",
         ":rns_secret_key",
-        ":serialization_cc_proto",
+        ":rns_serialization_cc_proto",
         "//shell_encryption:integral_types",
         "//shell_encryption/prng:single_thread_hkdf_prng",
         "//shell_encryption/rns/testing:parameters",
@@ -805,7 +811,7 @@ cc_library(
         ":rns_modulus",
         ":rns_polynomial",
         ":rns_secret_key",
-        ":serialization_cc_proto",
+        ":rns_serialization_cc_proto",
         "//shell_encryption:integral_types",
         "//shell_encryption:montgomery",
         "//shell_encryption:statusor_fork",
@@ -861,7 +867,7 @@ cc_library(
         ":rns_modulus",
         ":rns_polynomial",
         ":rns_secret_key",
-        ":serialization_cc_proto",
+        ":rns_serialization_cc_proto",
         "//shell_encryption:integral_types",
         "//shell_encryption:montgomery",
         "//shell_encryption:statusor_fork",

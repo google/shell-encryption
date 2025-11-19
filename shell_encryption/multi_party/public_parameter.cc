@@ -25,7 +25,7 @@
 #include "absl/status/statusor.h"
 #include "shell_encryption/integral_types.h"
 #include "shell_encryption/montgomery.h"
-#include "shell_encryption/multi_party/serialization.pb.h"
+#include "shell_encryption/multi_party/mp_serialization.pb.h"
 #include "shell_encryption/prng/prng.h"
 #include "shell_encryption/prng/single_thread_chacha_prng.h"
 #include "shell_encryption/prng/single_thread_hkdf_prng.h"
