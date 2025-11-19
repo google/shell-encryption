@@ -5,9 +5,16 @@ module(
 bazel_dep(name = "tink_cc", version = "2.4.0", repo_name = "com_github_tink_crypto_tink_cc")
 bazel_dep(name = "rules_cc", version = "0.2.9")
 bazel_dep(name = "rules_rust", version = "0.67.0")
-bazel_dep(name = "rules_rust_protobuf", version = "0.67.0")
-bazel_dep(name = "rules_proto", version = "7.1.0")
-bazel_dep(name = "protobuf", version = "33.0-rc2", repo_name = "com_google_protobuf")
+bazel_dep(name = "protobuf", version = "33.1")
+archive_override(
+    # Patches protobuf to make the Rust libraries visible. See
+    # https://github.com/protocolbuffers/protobuf/issues/23866.
+    module_name = "protobuf",
+    integrity = "sha256-F4n12LZfTcM249HtTdCAw3iK35iU7Ei61GTtjK3cS4Y=",
+    strip_prefix = "protobuf-9151e03956a34b795ca0d58e19d8a9991904b459",
+    urls = ["https://github.com/google/protobuf/archive/9151e03956a34b795ca0d58e19d8a9991904b459.zip"], 
+)
+
 bazel_dep(name = "googletest", version = "1.17.0.bcr.1", repo_name = "com_github_google_googletest")
 bazel_dep(name = "abseil-cpp", version = "20250814.1", repo_name = "com_google_absl")
 bazel_dep(name = "boringssl", version = "0.20251002.0")

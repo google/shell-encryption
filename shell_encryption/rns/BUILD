@@ -14,10 +14,10 @@
 
 # RNS extension of the rlwe library
 
-load("@rules_proto//proto:defs.bzl", "proto_library")
+load("@protobuf//bazel:proto_library.bzl", "proto_library")
+load("@protobuf//rust:defs.bzl", "rust_proto_library")
 load("@rules_cc//cc:cc_library.bzl", "cc_library")
 load("@rules_cc//cc:cc_test.bzl", "cc_test")
-load("@rules_rust_protobuf//:defs.bzl", "rust_proto_library")
 
 package(default_visibility = ["//visibility:public"])
 
