@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-load("@rules_proto//proto:defs.bzl", "proto_library")
+load("@protobuf//bazel:proto_library.bzl", "proto_library")
 load("@rules_cc//cc:cc_library.bzl", "cc_library")
 load("@rules_cc//cc:cc_test.bzl", "cc_test")
 
@@ -80,8 +80,8 @@ cc_library(
         "//shell_encryption:statusor_fork",
         "@com_github_google_googletest//:gtest",
         "@com_google_absl//absl/status",
-        "@com_google_protobuf//:differencer",
-        "@com_google_protobuf//:protobuf",
+        "@protobuf",
+        "@protobuf//:differencer",
     ],
 )
 
@@ -96,8 +96,8 @@ cc_library(
         "//shell_encryption:statusor_fork",
         "@com_github_google_googletest//:gtest",
         "@com_google_absl//absl/status",
-        "@com_google_protobuf//:differencer",
-        "@com_google_protobuf//:protobuf",
+        "@protobuf",
+        "@protobuf//:differencer",
     ],
 )
 
