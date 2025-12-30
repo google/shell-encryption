@@ -17,8 +17,6 @@ syntax = "proto2";
 
 package rlwe;
 
-option optimize_for = LITE_RUNTIME;
-
 // Polynomial in coefficient representation
 message SerializedCoefficientPolynomial {
   // Coefficients of the polynomial
