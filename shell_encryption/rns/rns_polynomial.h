@@ -190,7 +190,10 @@ class RnsPolynomial {
     return output;
   }
 
-  // Adds `that` to `this` in-place.
+  // Adds `that` to `this` in-place. May fail if the coefficient vectors of
+  // `this` and `that` are not the same size, or the number of coefficient
+  // vectors does not match the number of moduli. In case of failure, `this`
+  // is not modified.
   absl::Status AddInPlace(
       const RnsPolynomial& that,
       absl::Span<const PrimeModulus<ModularInt>* const> moduli) {
@@ -203,14 +206,28 @@ class RnsPolynomial {
       return absl::InvalidArgumentError(
           absl::StrCat("`moduli` must contain ", num_moduli, " RNS moduli."));
     }
+    // Check all coeff vectors have the right size to catch errors before
+    // modifying `this`.
     for (int i = 0; i < num_moduli; ++i) {
-      RLWE_RETURN_IF_ERROR(ModularInt::BatchAddInPlace(
-          &coeff_vectors_[i], that.coeff_vectors_[i], moduli[i]->ModParams()));
+      if (coeff_vectors_[i].size() != that.coeff_vectors_[i].size()) {
+        return absl::InvalidArgumentError(
+            absl::StrCat("Size of coefficient vector ", i, " does not match"));
+      }
+    }
+    for (int i = 0; i < num_moduli; ++i) {
+      ModularInt::BatchAddInPlace(&coeff_vectors_[i], that.coeff_vectors_[i],
+                                  moduli[i]->ModParams())
+          .IgnoreError();  // We already checked the sizes above, and
+                           // BatchAddInPlace will only fail if its inputs have
+                           // different sizes.
     }
     return absl::OkStatus();
   }
 
-  // Substracts `that` from `this` in-place.
+  // Substracts `that` from `this` in-place. May fail if the coefficient
+  // vectors of `this` and `that` are not the same size, or the number of
+  // coefficient vectors does not match the number of moduli. In case of
+  // failure, `this` is not modified.
   absl::Status SubInPlace(
       const RnsPolynomial& that,
       absl::Span<const PrimeModulus<ModularInt>* const> moduli) {
@@ -223,9 +240,20 @@ class RnsPolynomial {
       return absl::InvalidArgumentError(
           absl::StrCat("`moduli` must contain ", num_moduli, " RNS moduli."));
     }
+    // Check all coeff vectors have the right size to catch errors before
+    // modifying `this`.
     for (int i = 0; i < num_moduli; ++i) {
-      RLWE_RETURN_IF_ERROR(ModularInt::BatchSubInPlace(
-          &coeff_vectors_[i], that.coeff_vectors_[i], moduli[i]->ModParams()));
+      if (coeff_vectors_[i].size() != that.coeff_vectors_[i].size()) {
+        return absl::InvalidArgumentError(
+            absl::StrCat("Size of coefficient vector ", i, " does not match"));
+      }
+    }
+    for (int i = 0; i < num_moduli; ++i) {
+      ModularInt::BatchSubInPlace(&coeff_vectors_[i], that.coeff_vectors_[i],
+                                  moduli[i]->ModParams())
+          .IgnoreError();  // We already checked the sizes above, and
+                           // BatchSubInPlace will only fail if its inputs have
+                           // different sizes.
     }
     return absl::OkStatus();
   }
@@ -295,8 +323,10 @@ class RnsPolynomial {
     return output;
   }
 
-  // Multiplies this polynomial by `that`.
-  // Both `this` and `that` must be in NTT form.
+  // Multiplies this polynomial by `that`. Both `this` and `that` must be in NTT
+  // form. May fail if the coefficient vectors of `this` and `that` are not the
+  // same size, or the number of coefficient vectors does not match the number
+  // of moduli. In case of failure, `this` is not modified.
   absl::Status MulInPlace(
       const RnsPolynomial& that,
       absl::Span<const PrimeModulus<ModularInt>* const> moduli) {
@@ -317,16 +347,29 @@ class RnsPolynomial {
       return absl::InvalidArgumentError(
           "RNS polynomial `that` must be in NTT form.");
     }
-
+    // Check all coeff vectors have the right size to catch errors before
+    // modifying `this`.
     for (int i = 0; i < num_moduli; ++i) {
-      RLWE_RETURN_IF_ERROR(ModularInt::BatchMulInPlace(
-          &coeff_vectors_[i], that.coeff_vectors_[i], moduli[i]->ModParams()));
+      if (coeff_vectors_[i].size() != that.coeff_vectors_[i].size()) {
+        return absl::InvalidArgumentError(
+            absl::StrCat("Size of coefficient vector ", i, " does not match"));
+      }
+    }
+    for (int i = 0; i < num_moduli; ++i) {
+      ModularInt::BatchMulInPlace(&coeff_vectors_[i], that.coeff_vectors_[i],
+                                  moduli[i]->ModParams())
+          .IgnoreError();  // We already checked the sizes above, and
+                           // BatchMulInPlace will only fail if its inputs have
+                           // different sizes.
     }
     return absl::OkStatus();
   }
 
-  // Adds the polynomial product a * b to this polynomial.
-  // Polynomials `this`, `a`, and `b` must be all in NTT form.
+  // Adds the polynomial product a * b to this polynomial. Polynomials `this`,
+  // `a`, and `b` must be all in NTT form. May fail if the coefficient vectors
+  // of `this`, `a`, and `b` are not the same size, or the number of coefficient
+  // vectors does not match the number of moduli. In case of failure, `this` is
+  // not modified.
   absl::Status FusedMulAddInPlace(
       const RnsPolynomial& a, const RnsPolynomial& b,
       absl::Span<const PrimeModulus<ModularInt>* const> moduli) {
@@ -355,11 +398,22 @@ class RnsPolynomial {
       return absl::InvalidArgumentError(
           "RNS polynomial `b` must be in NTT form.");
     }
-
+    // Check all coeff vectors have the right size to catch errors before
+    // modifying `this`.
     for (int i = 0; i < num_moduli; ++i) {
-      RLWE_RETURN_IF_ERROR(ModularInt::BatchFusedMulAddInPlace(
+      if (coeff_vectors_[i].size() != a.coeff_vectors_[i].size() ||
+          coeff_vectors_[i].size() != b.coeff_vectors_[i].size()) {
+        return absl::InvalidArgumentError(
+            absl::StrCat("Size of coefficient vector ", i, " does not match"));
+      }
+    }
+    for (int i = 0; i < num_moduli; ++i) {
+      ModularInt::BatchFusedMulAddInPlace(
           &coeff_vectors_[i], a.coeff_vectors_[i], b.coeff_vectors_[i],
-          moduli[i]->ModParams()));
+          moduli[i]->ModParams())
+          .IgnoreError();  // We already checked the sizes above, and
+                           // BatchFusedMulAddInPlace will only fail if its
+                           // inputs have different sizes.
     }
     return absl::OkStatus();
   }
