@@ -2610,5 +2610,87 @@ TYPED_TEST(RnsPolynomialTest, SerializedDeserializes) {
   EXPECT_EQ(deserialized2, a);
 }
 
+TYPED_TEST(RnsPolynomialTest, AddInPlaceLeavesPolynomialUnchangedOnFailure) {
+  ASSERT_OK_AND_ASSIGN(RnsPolynomial<TypeParam> a, this->SampleRnsPolynomial());
+  ASSERT_OK_AND_ASSIGN(RnsPolynomial<TypeParam> b, this->SampleRnsPolynomial());
+
+  // Double the length of the coefficient vectors of b.
+  std::vector<std::vector<TypeParam>> b_coeffs = b.Coeffs();
+  for (int i = 0; i < b_coeffs.size(); ++i) {
+    b_coeffs[i].insert(b_coeffs[i].end(), b.Coeffs()[i].begin(),
+                       b.Coeffs()[i].end());
+  }
+  ASSERT_OK_AND_ASSIGN(
+      b, RnsPolynomial<TypeParam>::Create(std::move(b_coeffs), b.IsNttForm()));
+
+  auto a2 = a.Clone();
+  EXPECT_THAT(
+      a.AddInPlace(b, this->moduli_),
+      StatusIs(absl::StatusCode::kInvalidArgument, HasSubstr("same size")));
+  EXPECT_EQ(a, a2);
+}
+
+TYPED_TEST(RnsPolynomialTest, SubInPlaceLeavesPolynomialUnchangedOnFailure) {
+  ASSERT_OK_AND_ASSIGN(RnsPolynomial<TypeParam> a, this->SampleRnsPolynomial());
+  ASSERT_OK_AND_ASSIGN(RnsPolynomial<TypeParam> b, this->SampleRnsPolynomial());
+
+  // Double the length of the coefficient vectors of b.
+  std::vector<std::vector<TypeParam>> b_coeffs = b.Coeffs();
+  for (int i = 0; i < b_coeffs.size(); ++i) {
+    b_coeffs[i].insert(b_coeffs[i].end(), b.Coeffs()[i].begin(),
+                       b.Coeffs()[i].end());
+  }
+  ASSERT_OK_AND_ASSIGN(
+      b, RnsPolynomial<TypeParam>::Create(std::move(b_coeffs), b.IsNttForm()));
+
+  auto a2 = a.Clone();
+  EXPECT_THAT(
+      a.SubInPlace(b, this->moduli_),
+      StatusIs(absl::StatusCode::kInvalidArgument, HasSubstr("same size")));
+  EXPECT_EQ(a, a2);
+}
+
+TYPED_TEST(RnsPolynomialTest, MulInPlaceLeavesPolynomialUnchangedOnFailure) {
+  ASSERT_OK_AND_ASSIGN(RnsPolynomial<TypeParam> a, this->SampleRnsPolynomial());
+  ASSERT_OK_AND_ASSIGN(RnsPolynomial<TypeParam> b, this->SampleRnsPolynomial());
+
+  // Double the length of the coefficient vectors of b.
+  std::vector<std::vector<TypeParam>> b_coeffs = b.Coeffs();
+  for (int i = 0; i < b_coeffs.size(); ++i) {
+    b_coeffs[i].insert(b_coeffs[i].end(), b.Coeffs()[i].begin(),
+                       b.Coeffs()[i].end());
+  }
+  ASSERT_OK_AND_ASSIGN(
+      b, RnsPolynomial<TypeParam>::Create(std::move(b_coeffs), b.IsNttForm()));
+
+  auto a2 = a.Clone();
+  EXPECT_THAT(
+      a.MulInPlace(b, this->moduli_),
+      StatusIs(absl::StatusCode::kInvalidArgument, HasSubstr("same size")));
+  EXPECT_EQ(a, a2);
+}
+
+TYPED_TEST(RnsPolynomialTest,
+           FusedMulAddInPlaceLeavesPolynomialUnchangedOnFailure) {
+  ASSERT_OK_AND_ASSIGN(RnsPolynomial<TypeParam> a, this->SampleRnsPolynomial());
+  ASSERT_OK_AND_ASSIGN(RnsPolynomial<TypeParam> b, this->SampleRnsPolynomial());
+  ASSERT_OK_AND_ASSIGN(RnsPolynomial<TypeParam> c, this->SampleRnsPolynomial());
+
+  // Double the length of the coefficient vectors of b.
+  std::vector<std::vector<TypeParam>> b_coeffs = b.Coeffs();
+  for (int i = 0; i < b_coeffs.size(); ++i) {
+    b_coeffs[i].insert(b_coeffs[i].end(), b.Coeffs()[i].begin(),
+                       b.Coeffs()[i].end());
+  }
+  ASSERT_OK_AND_ASSIGN(
+      b, RnsPolynomial<TypeParam>::Create(std::move(b_coeffs), b.IsNttForm()));
+
+  auto a2 = a.Clone();
+  EXPECT_THAT(
+      a.FusedMulAddInPlace(b, c, this->moduli_),
+      StatusIs(absl::StatusCode::kInvalidArgument, HasSubstr("same size")));
+  EXPECT_EQ(a, a2);
+}
+
 }  // namespace
 }  // namespace rlwe
