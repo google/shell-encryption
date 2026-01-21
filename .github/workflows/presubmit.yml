@@ -37,9 +37,9 @@ jobs:
         with:
           path: |
             ~/.cache/bazel
-          key: ${{ runner.os }}-${{ hashFiles('.bazelrc', 'MODULE.bazel.lock') }}-${{ github.sha }}
+          key: ${{ runner.os }}-${{ hashFiles('.bazelrc', '.bazelversion', 'MODULE.bazel.lock') }}-${{ github.sha }}
           restore-keys: |
-            ${{ runner.os }}-${{ hashFiles('.bazelrc', 'MODULE.bazel.lock') }}-
+            ${{ runner.os }}-${{ hashFiles('.bazelrc', '.bazelversion', 'MODULE.bazel.lock') }}-
 
       - name: "Run `bazel build`"
         run: |
