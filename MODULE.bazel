@@ -3,7 +3,16 @@ module(
 )
 
 bazel_dep(name = "tink_cc", version = "2.4.0", repo_name = "com_github_tink_crypto_tink_cc")
-bazel_dep(name = "rules_cc", version = "0.2.14")
+archive_override(
+    module_name = "tink_cc",
+    integrity = "sha256-jzhD0HxEC3Qm4NIX663zXRZRkbuNwgnpwvhE2/sAOBE=",
+    strip_prefix = "tink-cc-c3deba7cc1ceccbeab35b60e7ffd045c4b0842b2",
+    urls = [
+        "https://github.com/tink-crypto/tink-cc/archive/c3deba7cc1ceccbeab35b60e7ffd045c4b0842b2.zip",
+    ],
+)
+
+bazel_dep(name = "rules_cc", version = "0.2.16")
 bazel_dep(name = "rules_rust", version = "0.68.1")
 bazel_dep(name = "protobuf", version = "33.4")
 archive_override(
@@ -16,8 +25,16 @@ archive_override(
 )
 
 bazel_dep(name = "googletest", version = "1.17.0.bcr.2", repo_name = "com_github_google_googletest")
-bazel_dep(name = "abseil-cpp", version = "20250814.1", repo_name = "com_google_absl")
+bazel_dep(name = "abseil-cpp", version = "20260107.0", repo_name = "com_google_absl")
 bazel_dep(name = "boringssl", version = "0.20251002.0")
 bazel_dep(name = "glog", version = "0.7.1.bcr.1", repo_name = "com_github_google_glog")
 bazel_dep(name = "rules_license", version = "1.0.0")
 bazel_dep(name = "highway", version = "1.3.0", repo_name = "com_github_google_highway")
+archive_override(
+    module_name = "highway",
+    integrity = "sha256-bnAX6HJwqH6hoDZufepeSXd7skWnJJh76qGnjRnF9Y0=",
+    strip_prefix = "highway-224b014b1e6ebd1b9c1e134ebb5fbce899844c79",
+    urls = [
+        "https://github.com/google/highway/archive/224b014b1e6ebd1b9c1e134ebb5fbce899844c79.zip",
+    ],
+)
