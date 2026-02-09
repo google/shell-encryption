@@ -112,14 +112,7 @@ void BatchFusedMulAddMontgomeryRepHwy(absl::Span<const ModularInt64> a,
 
   // Generate the masks on the even lanes, which correspond to the lower 64 bits
   // of BigInt64 (unsigned 128-bit int) values in the output vector.
-  uint8_t* mask_lo_bits = new uint8_t[(N + 7) / 8];
-  for (int j = 0; j < (N + 7) / 8; ++j) {
-    mask_lo_bits[j] = 0;
-    for (int k = 0; k < 8; k += 2) {
-      mask_lo_bits[j] |= static_cast<uint8_t>(1 << k);
-    }
-  }
-  auto mask_lo = hn::LoadMaskBits(d, mask_lo_bits);
+  auto mask_lo = hn::Eq(hn::And(hn::Iota(d, 0), hn::Set(d, 1)), hn::Zero(d));
   // A highway vector whose odd lanes (higher 64 bits of the output vector) are
   // all 1's and even lanes are all 0's.
   auto ones = hn::Slide1Up(d, hn::IfThenElseZero(mask_lo, hn::Set(d, 1)));
@@ -169,7 +162,6 @@ void BatchFusedMulAddMontgomeryRepHwy(absl::Span<const ModularInt64> a,
     hn::Store(output0, d, output0_ptr);
     hn::Store(output1, d, output1_ptr);
   }
-  delete[] mask_lo_bits;
 
   // Handle the remaining elements in the input vectors.
   for (; i < num_coeffs; ++i) {
