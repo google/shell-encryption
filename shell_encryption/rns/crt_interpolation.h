@@ -18,11 +18,8 @@
 
 #include <vector>
 
-#include "absl/numeric/int128.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
-#include "shell_encryption/integral_types.h"
-#include "shell_encryption/montgomery.h"
 #include "shell_encryption/rns/rns_modulus.h"
 
 namespace rlwe {

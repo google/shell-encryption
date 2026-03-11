@@ -148,9 +148,6 @@ cc_library(
     hdrs = ["crt_interpolation.h"],
     deps = [
         ":rns_modulus",
-        "//shell_encryption:integral_types",
-        "//shell_encryption:montgomery",
-        "@com_google_absl//absl/numeric:int128",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
     ],
