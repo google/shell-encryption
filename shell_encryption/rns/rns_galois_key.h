@@ -230,7 +230,7 @@ class RnsGaloisKey {
     return key_bs_;
   }
 
-  const RnsGadget<ModularInt>* Gadget() { return gadget_; }
+  const RnsGadget<ModularInt>* Gadget() const { return gadget_; }
 
   int Dimension() const { return key_as_.size(); }
 
