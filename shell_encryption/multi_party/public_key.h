@@ -160,7 +160,6 @@ absl::Status PublicKey<ModularInt>::EncryptExplicit(
 
   // Encode message into a plaintext polynomial.
   auto moduli = public_parameter_->Moduli();
-  Integer t = encoder->PlaintextModulus();
   RLWE_ASSIGN_OR_RETURN(RnsPolynomial<ModularInt> plaintext,
                         encoder->EncodeBfv(messages, moduli));
   if (!plaintext.IsNttForm()) {
