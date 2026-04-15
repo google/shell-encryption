@@ -229,6 +229,10 @@ RelinearizationKey<ModularInt>::Create(const SymmetricRlweKey<ModularInt>& key,
     return absl::InvalidArgumentError(absl::StrCat(
         "Log decomposition modulus, ", log_decomposition_modulus,
         ", must be at most: ", key.ModulusParams()->log_modulus, "."));
+  } else if (log_decomposition_modulus >= 32) {
+    return absl::InvalidArgumentError(
+        absl::StrCat("Log decomposition modulus, ", log_decomposition_modulus,
+                     ", must be less than 32."));
   }
   RLWE_ASSIGN_OR_RETURN(auto decomposition_modulus,
                         ModularInt::ImportInt(key.ModulusParams()->One()
@@ -401,6 +405,10 @@ RelinearizationKey<ModularInt>::Deserialize(
     return absl::InvalidArgumentError(absl::StrCat(
         "Log decomposition modulus, ", serialized.log_decomposition_modulus(),
         ", must be at most: ", modulus_params->log_modulus, "."));
+  } else if (serialized.log_decomposition_modulus() >= 32) {
+    return absl::InvalidArgumentError(absl::StrCat(
+        "Log decomposition modulus, ", serialized.log_decomposition_modulus(),
+        ", must be less than 32."));
   }
 
   int polynomials_per_key_part = serialized.c_size() / expected_num_key_parts;
