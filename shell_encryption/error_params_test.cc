@@ -219,6 +219,29 @@ TYPED_TEST(ErrorParamsTest, RelinearizationErrorScalesWithNumComponents) {
   }
 }
 
+// Test that the relinearization error can be computed when
+// log_decomposition_modulus is equal to log(modulus) which is the largest
+// possible value.
+TYPED_TEST(ErrorParamsTest,
+           RelinearizationErrorForLargeLogDecompositionModulus) {
+  for (const auto& params :
+       rlwe::testing::ContextParameters<TypeParam>::Value()) {
+    ASSERT_OK_AND_ASSIGN(auto context,
+                         rlwe::RlweContext<TypeParam>::Create(params));
+    const int k_decomposition_modulus =
+        context->GetModulusParams()->log_modulus;
+    constexpr int k_num_components = 2;
+    // When log_decomposition_modulus = log(modulus), we are effectively
+    // not decomposing the ciphertext coefficients, and so the error can be
+    // much larger than the ciphertext modulus. In practice, we would never use
+    // such a large decomposition modulus, but we test it here to make sure the
+    // error computation does not fail.
+    EXPECT_GT(context->GetErrorParams()->B_relinearize(k_num_components,
+                                                       k_decomposition_modulus),
+              0.0);
+  }
+}
+
 }  //  namespace
 
 #endif  // RLWE_ERROR_PARAMS_TEST_H_

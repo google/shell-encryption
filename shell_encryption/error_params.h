@@ -71,7 +71,8 @@ class ErrorParams {
     // decomposition modulus.
     int num_digits = (log_decomposition_modulus + log_modulus_ - 1) /
                      log_decomposition_modulus;
-    int decomposition_modulus = 1 << log_decomposition_modulus;
+    double decomposition_modulus = static_cast<double>(
+        static_cast<typename ModularInt::Int>(1) << log_decomposition_modulus);
     return (8.0 / sqrt(3.0)) * ExportDoubleT() * num_digits * sigma_ *
            dimension_ * decomposition_modulus * num_components;
   }
