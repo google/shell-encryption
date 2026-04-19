@@ -215,6 +215,14 @@ absl::StatusOr<RnsGaloisKey<ModularInt>> RnsGaloisKey<ModularInt>::Deserialize(
     return absl::InvalidArgumentError("`key_bs` must not be empty.");
   }
 
+  // Validate that the gadget dimension matches the serialized key_bs size
+  // to prevent out-of-bounds memory access in ApplyToRlweCiphertext.
+  if (dimension != gadget->Dimension()) {
+    return absl::InvalidArgumentError(absl::StrCat(
+        "`key_bs` size (", dimension, ") must match gadget dimension (",
+        gadget->Dimension(), ")."));
+  }
+
   std::vector<RnsPolynomial<ModularInt>> key_bs;
   key_bs.reserve(dimension);
   for (int i = 0; i < dimension; ++i) {
