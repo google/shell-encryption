@@ -112,9 +112,11 @@ void BatchFusedMulAddMontgomeryRepHwy(absl::Span<const ModularInt64> a,
 
   // Generate the masks on the even lanes, which correspond to the lower 64 bits
   // of BigInt64 (unsigned 128-bit int) values in the output vector.
-  uint8_t* mask_lo_bits = new uint8_t[(N + 7) / 8];
-  for (int j = 0; j < (N + 7) / 8; ++j) {
-    mask_lo_bits[j] = 0;
+  // LoadMaskBits requires at least 8 readable bytes, even if N is small.
+  int num_bytes = (N + 7) / 8;
+  int alloc_bytes = num_bytes < 8 ? 8 : num_bytes;
+  uint8_t* mask_lo_bits = new uint8_t[alloc_bytes]();
+  for (int j = 0; j < num_bytes; ++j) {
     for (int k = 0; k < 8; k += 2) {
       mask_lo_bits[j] |= static_cast<uint8_t>(1 << k);
     }
