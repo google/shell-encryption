@@ -44,6 +44,46 @@ void BatchFusedMulAddMontgomeryRepNoHwy(
     absl::Span<const MontgomeryInt<Integer>> b,
     hwy::AlignedVector<typename BigInt<Integer>::value_type>& output);
 
+// Given vectors `a`,`b`, and `c`, computes component-wise (a[i] + b[i]) * c[i]
+// and add them to output[i]. Modular multiplications are computed over the
+// Montgomery form without reduction (and store the result in double width
+// BigInt type), and are implemented using SIMD instructions via the highway
+// library. Note: We assume that `a`, `b`, and `c` all have the same size, and
+// `output` has at least the same number of elements.
+template <typename Integer>
+void BatchFusedMulSumAddMontgomeryRep(
+    absl::Span<const MontgomeryInt<Integer>> a,
+    absl::Span<const MontgomeryInt<Integer>> b,
+    absl::Span<const MontgomeryInt<Integer>> c,
+    hwy::AlignedVector<typename BigInt<Integer>::value_type>& output);
+
+template <typename Integer>
+void BatchFusedMulSumAddMontgomeryRepNoHwy(
+    absl::Span<const MontgomeryInt<Integer>> a,
+    absl::Span<const MontgomeryInt<Integer>> b,
+    absl::Span<const MontgomeryInt<Integer>> c,
+    hwy::AlignedVector<typename BigInt<Integer>::value_type>& output);
+
+// Given vectors `a`,`b`, and `c`, computes component-wise (a[i] - b[i]) * c[i]
+// and add them to output[i]. Modular multiplications are computed over the
+// Montgomery form without reduction (and store the result in double width
+// BigInt type), and are implemented using SIMD instructions via the highway
+// library. Note: We assume that `a`, `b`, and `c` all have the same size, and
+// `output` has at least the same number of elements.
+template <typename Integer>
+void BatchFusedMulDifferenceAddMontgomeryRep(
+    absl::Span<const MontgomeryInt<Integer>> a,
+    absl::Span<const MontgomeryInt<Integer>> b,
+    absl::Span<const MontgomeryInt<Integer>> c, Integer q,
+    hwy::AlignedVector<typename BigInt<Integer>::value_type>& output);
+
+template <typename Integer>
+void BatchFusedMulDifferenceAddMontgomeryRepNoHwy(
+    absl::Span<const MontgomeryInt<Integer>> a,
+    absl::Span<const MontgomeryInt<Integer>> b,
+    absl::Span<const MontgomeryInt<Integer>> c, Integer q,
+    hwy::AlignedVector<typename BigInt<Integer>::value_type>& output);
+
 }  // namespace internal
 }  // namespace rlwe
 

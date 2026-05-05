@@ -133,6 +133,18 @@ class LazyRnsPolynomial {
       const RnsPolynomial<ModularInt>& a, const RnsPolynomial<ModularInt>& b,
       absl::Span<const PrimeModulus<ModularInt>* const> moduli);
 
+  // Adds (a + b) * c (mod moduli) to this polynomial.
+  absl::Status FusedMulSumAddInPlace(
+      const RnsPolynomial<ModularInt>& a, const RnsPolynomial<ModularInt>& b,
+      const RnsPolynomial<ModularInt>& c,
+      absl::Span<const PrimeModulus<ModularInt>* const> moduli);
+
+  // Adds (a - b) * c (mod moduli) to this polynomial.
+  absl::Status FusedMulDifferenceAddInPlace(
+      const RnsPolynomial<ModularInt>& a, const RnsPolynomial<ModularInt>& b,
+      const RnsPolynomial<ModularInt>& c,
+      absl::Span<const PrimeModulus<ModularInt>* const> moduli);
+
  private:
   explicit LazyRnsPolynomial(
       std::vector<hwy::AlignedVector<BigInt>> coeff_vectors,
@@ -181,6 +193,11 @@ class LazyRnsPolynomial {
 
   absl::Status CheckFusedMulAddInPlaceParameters(
       const RnsPolynomial<ModularInt>& a, const RnsPolynomial<ModularInt>& b,
+      absl::Span<const PrimeModulus<ModularInt>* const> moduli);
+
+  absl::Status CheckFusedMulSumAddInPlaceParameters(
+      const RnsPolynomial<ModularInt>& a, const RnsPolynomial<ModularInt>& b,
+      const RnsPolynomial<ModularInt>& c,
       absl::Span<const PrimeModulus<ModularInt>* const> moduli);
 
   // Coefficients of the polynomial modulo prime moduli.
