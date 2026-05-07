@@ -219,6 +219,160 @@ TYPED_TEST(LazyRnsPolynomialNegativeTest,
                                  "this lazy polynomial")));
 }
 
+
+TYPED_TEST(LazyRnsPolynomialNegativeTest,
+           FusedMulSumAddFailsIfPolynomialNotInNttForm) {
+  int log_n = this->rns_context_->LogN();
+  ASSERT_OK_AND_ASSIGN(
+      auto poly_ntt, RnsPolynomial<TypeParam>::CreateZero(log_n, this->moduli_,
+                                                          /*is_ntt=*/true));
+  ASSERT_OK_AND_ASSIGN(auto poly_not_ntt,
+                       RnsPolynomial<TypeParam>::CreateZero(
+                           log_n, this->moduli_, /*is_ntt=*/false));
+  ASSERT_OK_AND_ASSIGN(auto lazy, LazyRnsPolynomial<TypeParam>::CreateZero(
+                                       log_n, this->moduli_));
+  EXPECT_THAT(
+      lazy.FusedMulSumAddInPlace(poly_not_ntt, poly_ntt, poly_ntt,
+                                 this->moduli_),
+      StatusIs(absl::StatusCode::kInvalidArgument, HasSubstr("NTT form")));
+  EXPECT_THAT(
+      lazy.FusedMulSumAddInPlace(poly_ntt, poly_not_ntt, poly_ntt,
+                                 this->moduli_),
+      StatusIs(absl::StatusCode::kInvalidArgument, HasSubstr("NTT form")));
+  EXPECT_THAT(
+      lazy.FusedMulSumAddInPlace(poly_ntt, poly_ntt, poly_not_ntt,
+                                 this->moduli_),
+      StatusIs(absl::StatusCode::kInvalidArgument, HasSubstr("NTT form")));
+}
+
+TYPED_TEST(LazyRnsPolynomialNegativeTest,
+           FusedMulSumAddFailsIfPolynomialModuliMismatch) {
+  int log_n = this->rns_context_->LogN();
+  int num_moduli = this->moduli_.size();
+  ASSERT_GE(num_moduli, 2) << "Must have at least two moduli.";
+  auto moduli_reduced = absl::MakeSpan(this->moduli_).subspan(0, num_moduli - 1);
+  ASSERT_OK_AND_ASSIGN(auto poly_reduced, RnsPolynomial<TypeParam>::CreateZero(
+                                              log_n, moduli_reduced));
+  ASSERT_OK_AND_ASSIGN(
+      auto poly, RnsPolynomial<TypeParam>::CreateZero(log_n, this->moduli_));
+  ASSERT_OK_AND_ASSIGN(auto lazy, LazyRnsPolynomial<TypeParam>::CreateZero(
+                                       log_n, this->moduli_));
+  EXPECT_THAT(lazy.FusedMulSumAddInPlace(poly_reduced, poly, poly,
+                                        this->moduli_),
+              StatusIs(absl::StatusCode::kInvalidArgument,
+                       HasSubstr("must all be defined wrt `moduli`")));
+  EXPECT_THAT(lazy.FusedMulSumAddInPlace(poly, poly_reduced, poly,
+                                        this->moduli_),
+              StatusIs(absl::StatusCode::kInvalidArgument,
+                       HasSubstr("must all be defined wrt `moduli`")));
+  EXPECT_THAT(lazy.FusedMulSumAddInPlace(poly, poly, poly_reduced,
+                                        this->moduli_),
+              StatusIs(absl::StatusCode::kInvalidArgument,
+                       HasSubstr("must all be defined wrt `moduli`")));
+}
+
+TYPED_TEST(LazyRnsPolynomialNegativeTest,
+           FusedMulSumAddFailsIfPolynomialDegreeMismatch) {
+  int log_n = this->rns_context_->LogN();
+  ASSERT_OK_AND_ASSIGN(
+      auto poly, RnsPolynomial<TypeParam>::CreateZero(log_n, this->moduli_));
+  ASSERT_OK_AND_ASSIGN(auto poly_small, RnsPolynomial<TypeParam>::CreateZero(
+                                            log_n - 1, this->moduli_));
+  ASSERT_OK_AND_ASSIGN(auto lazy, LazyRnsPolynomial<TypeParam>::CreateZero(
+                                       log_n, this->moduli_));
+  EXPECT_THAT(lazy.FusedMulSumAddInPlace(poly_small, poly, poly, this->moduli_),
+              StatusIs(absl::StatusCode::kInvalidArgument,
+                       HasSubstr("must have the same number of coefficients")));
+  EXPECT_THAT(lazy.FusedMulSumAddInPlace(poly, poly_small, poly, this->moduli_),
+              StatusIs(absl::StatusCode::kInvalidArgument,
+                       HasSubstr("must have the same number of coefficients")));
+  EXPECT_THAT(lazy.FusedMulSumAddInPlace(poly, poly, poly_small, this->moduli_),
+              StatusIs(absl::StatusCode::kInvalidArgument,
+                       HasSubstr("must have the same number of coefficients")));
+}
+
+TYPED_TEST(LazyRnsPolynomialNegativeTest,
+           FusedMulDifferenceAddFailsIfPolynomialNotInNttForm) {
+  int log_n = this->rns_context_->LogN();
+  ASSERT_OK_AND_ASSIGN(
+      auto poly_ntt, RnsPolynomial<TypeParam>::CreateZero(log_n, this->moduli_,
+                                                          /*is_ntt=*/true));
+  ASSERT_OK_AND_ASSIGN(auto poly_not_ntt,
+                       RnsPolynomial<TypeParam>::CreateZero(
+                           log_n, this->moduli_, /*is_ntt=*/false));
+  ASSERT_OK_AND_ASSIGN(auto lazy, LazyRnsPolynomial<TypeParam>::CreateZero(
+                                       log_n, this->moduli_));
+  EXPECT_THAT(
+      lazy.FusedMulDifferenceAddInPlace(poly_not_ntt, poly_ntt, poly_ntt,
+                                       this->moduli_),
+      StatusIs(absl::StatusCode::kInvalidArgument, HasSubstr("NTT form")));
+}
+
+TYPED_TEST(LazyRnsPolynomialNegativeTest,
+           FusedMulDifferenceAddFailsIfPolynomialModuliMismatch) {
+  int log_n = this->rns_context_->LogN();
+  int num_moduli = this->moduli_.size();
+  if (num_moduli < 2) {
+    GTEST_SKIP() << "Must have at least two moduli.";
+  }
+  auto moduli_reduced = absl::MakeSpan(this->moduli_).subspan(0, num_moduli - 1);
+  ASSERT_OK_AND_ASSIGN(auto poly_reduced, RnsPolynomial<TypeParam>::CreateZero(
+                                              log_n, moduli_reduced));
+  ASSERT_OK_AND_ASSIGN(
+      auto poly, RnsPolynomial<TypeParam>::CreateZero(log_n, this->moduli_));
+  ASSERT_OK_AND_ASSIGN(auto lazy, LazyRnsPolynomial<TypeParam>::CreateZero(
+                                       log_n, this->moduli_));
+  EXPECT_THAT(lazy.FusedMulDifferenceAddInPlace(poly_reduced, poly, poly,
+                                               this->moduli_),
+              StatusIs(absl::StatusCode::kInvalidArgument,
+                       HasSubstr("must all be defined wrt `moduli`")));
+}
+
+TYPED_TEST(LazyRnsPolynomialNegativeTest,
+           FusedMulDifferenceAddFailsIfPolynomialDegreeMismatch) {
+  int log_n = this->rns_context_->LogN();
+  ASSERT_OK_AND_ASSIGN(
+      auto poly, RnsPolynomial<TypeParam>::CreateZero(log_n, this->moduli_));
+  ASSERT_OK_AND_ASSIGN(auto poly_small, RnsPolynomial<TypeParam>::CreateZero(
+                                            log_n - 1, this->moduli_));
+  ASSERT_OK_AND_ASSIGN(auto lazy, LazyRnsPolynomial<TypeParam>::CreateZero(
+                                       log_n, this->moduli_));
+  EXPECT_THAT(
+      lazy.FusedMulDifferenceAddInPlace(poly_small, poly, poly, this->moduli_),
+      StatusIs(absl::StatusCode::kInvalidArgument,
+               HasSubstr("must have the same number of coefficients")));
+}
+
+TYPED_TEST(LazyRnsPolynomialNegativeTest, FusedMulSumAddFailsIfModulusTooLarge) {
+  int log_n = 2;
+  int bitsize = sizeof(typename TypeParam::Int) * 8;
+  // We need log_modulus + 3 >= bitsize to trigger the error.
+  typename TypeParam::Int large_modulus =
+      (static_cast<typename TypeParam::Int>(1) << (bitsize - 3)) + 1;
+  // Make it odd for MontgomeryParams::Create to succeed.
+  if (large_modulus % 2 == 0) large_modulus++;
+
+  ASSERT_OK_AND_ASSIGN(auto mod_params, TypeParam::Params::Create(large_modulus));
+
+  PrimeModulus<TypeParam> large_prime_modulus;
+  large_prime_modulus.mod_params = std::move(mod_params);
+  std::vector<const PrimeModulus<TypeParam>*> moduli = {&large_prime_modulus};
+
+  ASSERT_OK_AND_ASSIGN(auto poly, RnsPolynomial<TypeParam>::CreateZero(
+                                      log_n, moduli, /*is_ntt=*/true));
+  ASSERT_OK_AND_ASSIGN(auto lazy,
+                       LazyRnsPolynomial<TypeParam>::CreateZero(log_n, moduli));
+
+  EXPECT_THAT(
+      lazy.FusedMulSumAddInPlace(poly, poly, poly, moduli),
+      StatusIs(absl::StatusCode::kInvalidArgument,
+               HasSubstr("Modulus is too large to perform fused multiply-sum-add")));
+  EXPECT_THAT(
+      lazy.FusedMulDifferenceAddInPlace(poly, poly, poly, moduli),
+      StatusIs(absl::StatusCode::kInvalidArgument,
+               HasSubstr("Modulus is too large to perform fused multiply-sum-add")));
+}
+
 TYPED_TEST(LazyRnsPolynomialTest, CreateExport) {
   int log_n = this->rns_context_->LogN();
   ASSERT_OK_AND_ASSIGN(RnsPolynomial<TypeParam> a,
@@ -272,6 +426,62 @@ TYPED_TEST(LazyRnsPolynomialTest, FusedMulAddInPlace) {
                          lazy.Export(this->moduli_));
     EXPECT_EQ(lazy_export, expected);
   }
+}
+
+TYPED_TEST(LazyRnsPolynomialTest, FusedMulSumAddInPlace) {
+  for (auto modulus : this->moduli_) {
+    if (modulus->ModParams()->log_modulus + 3 >=
+        sizeof(typename TypeParam::Int) * 8) {
+      GTEST_SKIP() << "Modulus is too large to perform fused multiply-sum-add.";
+    }
+  }
+  int log_n = this->rns_context_->LogN();
+  ASSERT_OK_AND_ASSIGN(RnsPolynomial<TypeParam> a,
+                       RnsPolynomial<TypeParam>::SampleUniform(
+                           log_n, this->prng_.get(), this->moduli_));
+  ASSERT_OK_AND_ASSIGN(RnsPolynomial<TypeParam> b,
+                       RnsPolynomial<TypeParam>::SampleUniform(
+                           log_n, this->prng_.get(), this->moduli_));
+  ASSERT_OK_AND_ASSIGN(RnsPolynomial<TypeParam> c,
+                       RnsPolynomial<TypeParam>::SampleUniform(
+                           log_n, this->prng_.get(), this->moduli_));
+  ASSERT_OK_AND_ASSIGN(auto lazy, LazyRnsPolynomial<TypeParam>::CreateZero(
+                                       log_n, this->moduli_));
+  ASSERT_OK(lazy.FusedMulSumAddInPlace(a, b, c, this->moduli_));
+  ASSERT_OK_AND_ASSIGN(RnsPolynomial<TypeParam> lazy_export,
+                       lazy.Export(this->moduli_));
+
+  ASSERT_OK_AND_ASSIGN(auto sum, a.Add(b, this->moduli_));
+  ASSERT_OK_AND_ASSIGN(auto expected, sum.Mul(c, this->moduli_));
+  EXPECT_EQ(lazy_export, expected);
+}
+
+TYPED_TEST(LazyRnsPolynomialTest, FusedMulDifferenceAddInPlace) {
+  for (auto modulus : this->moduli_) {
+    if (modulus->ModParams()->log_modulus + 3 >=
+        sizeof(typename TypeParam::Int) * 8) {
+      GTEST_SKIP() << "Modulus is too large to perform fused multiply-difference-add.";
+    }
+  }
+  int log_n = this->rns_context_->LogN();
+  ASSERT_OK_AND_ASSIGN(RnsPolynomial<TypeParam> a,
+                       RnsPolynomial<TypeParam>::SampleUniform(
+                           log_n, this->prng_.get(), this->moduli_));
+  ASSERT_OK_AND_ASSIGN(RnsPolynomial<TypeParam> b,
+                       RnsPolynomial<TypeParam>::SampleUniform(
+                           log_n, this->prng_.get(), this->moduli_));
+  ASSERT_OK_AND_ASSIGN(RnsPolynomial<TypeParam> c,
+                       RnsPolynomial<TypeParam>::SampleUniform(
+                           log_n, this->prng_.get(), this->moduli_));
+  ASSERT_OK_AND_ASSIGN(auto lazy, LazyRnsPolynomial<TypeParam>::CreateZero(
+                                       log_n, this->moduli_));
+  ASSERT_OK(lazy.FusedMulDifferenceAddInPlace(a, b, c, this->moduli_));
+  ASSERT_OK_AND_ASSIGN(RnsPolynomial<TypeParam> lazy_export,
+                       lazy.Export(this->moduli_));
+
+  ASSERT_OK_AND_ASSIGN(auto diff, a.Sub(b, this->moduli_));
+  ASSERT_OK_AND_ASSIGN(auto expected, diff.Mul(c, this->moduli_));
+  EXPECT_EQ(lazy_export, expected);
 }
 
 }  // namespace

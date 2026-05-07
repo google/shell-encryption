@@ -358,6 +358,7 @@ class RnsRlweCiphertext {
       RLWE_ASSIGN_OR_RETURN(auto lazy, LazyRnsPolynomial<ModularInt>::Create(
                                            ctxt.components_[0], ptxt, moduli_));
       lazy_components_.push_back(std::move(lazy));
+      error_ += ctxt.error_ * error_params_->B_plaintext();
       return absl::OkStatus();
     }
 
@@ -367,6 +368,83 @@ class RnsRlweCiphertext {
 
     // Update the error.
     error_ += ctxt.error_ * error_params_->B_plaintext();
+    return absl::OkStatus();
+  }
+
+  absl::Status FusedAbsorbSumAddInPlaceWithoutPadLazily(
+      const RnsRlweCiphertext& ctxt1, const RnsRlweCiphertext& ctxt2,
+      const RnsPolynomial<ModularInt>& ptxt) {
+    if (ctxt1.Degree() != 1 || ctxt2.Degree() != 1) {
+      return absl::InvalidArgumentError(
+          "`FusedAbsorbSumAddInPlaceWithoutPad only applies to degree 1 "
+          "ciphertext.");
+    }
+    if (Level() != ctxt1.Level() || Level() != ctxt2.Level()) {
+      return absl::InvalidArgumentError("`ctxt` has a mismatched level.");
+    }
+    if (PowerOfS() != ctxt1.PowerOfS() || PowerOfS() != ctxt2.PowerOfS()) {
+      return absl::InvalidArgumentError("`ctxt` has a mismatched key power.");
+    }
+
+    // If lazy_components_ is empty, this is the first time we call this
+    // function. We therefore create the vector of lazy polynomials using the
+    // input ctxt.component[0] and ptxt.
+    if (lazy_components_.empty()) {
+      lazy_components_.reserve(1);
+      // Compute the non-"a" part.
+      RLWE_ASSIGN_OR_RETURN(
+          auto sum, ctxt1.components_[0].Add(ctxt2.components_[0], moduli_));
+      RLWE_ASSIGN_OR_RETURN(
+          auto lazy, LazyRnsPolynomial<ModularInt>::Create(sum, ptxt, moduli_));
+      lazy_components_.push_back(std::move(lazy));
+      error_ += (ctxt1.error_ + ctxt2.error_) * error_params_->B_plaintext();
+      return absl::OkStatus();
+    }
+
+    // Compute the non-"a" part.
+    RLWE_RETURN_IF_ERROR(lazy_components_[0].FusedMulSumAddInPlace(
+        ctxt1.components_[0], ctxt2.components_[0], ptxt, moduli_));
+
+    // Update the error.
+    error_ += (ctxt1.error_ + ctxt2.error_) * error_params_->B_plaintext();
+    return absl::OkStatus();
+  }
+
+  absl::Status FusedAbsorbDiffAddInPlaceWithoutPadLazily(
+      const RnsRlweCiphertext& ctxt1, const RnsRlweCiphertext& ctxt2,
+      const RnsPolynomial<ModularInt>& ptxt) {
+    if (ctxt1.Degree() != 1 || ctxt2.Degree() != 1) {
+      return absl::InvalidArgumentError(
+          "`FusedAbsorbDiffAddInPlaceWithoutPad only applies to degree 1 "
+          "ciphertext.");
+    }
+    if (Level() != ctxt1.Level() || Level() != ctxt2.Level()) {
+      return absl::InvalidArgumentError("`ctxt` has a mismatched level.");
+    }
+    if (PowerOfS() != ctxt1.PowerOfS() || PowerOfS() != ctxt2.PowerOfS()) {
+      return absl::InvalidArgumentError("`ctxt` has a mismatched key power.");
+    }
+
+    // If lazy_components_ is empty, this is the first time we call this
+    // function. We therefore create the vector of lazy polynomials using the
+    // input ctxt.component[0] and ptxt.
+    if (lazy_components_.empty()) {
+      lazy_components_.reserve(1);
+      // Compute the non-"a" part.
+      RLWE_ASSIGN_OR_RETURN(
+          auto diff, ctxt1.components_[0].Sub(ctxt2.components_[0], moduli_));
+      RLWE_ASSIGN_OR_RETURN(auto lazy, LazyRnsPolynomial<ModularInt>::Create(
+                                           diff, ptxt, moduli_));
+      lazy_components_.push_back(std::move(lazy));
+      return absl::OkStatus();
+    }
+
+    // Compute the non-"a" part.
+    RLWE_RETURN_IF_ERROR(lazy_components_[0].FusedMulDifferenceAddInPlace(
+        ctxt1.components_[0], ctxt2.components_[0], ptxt, moduli_));
+
+    // Update the error.
+    error_ += (ctxt1.error_ + ctxt2.error_) * error_params_->B_plaintext();
     return absl::OkStatus();
   }
 

@@ -55,6 +55,38 @@ absl::Status LazyRnsPolynomial<ModularInt>::CheckFusedMulAddInPlaceParameters(
 }
 
 template <typename ModularInt>
+absl::Status
+LazyRnsPolynomial<ModularInt>::CheckFusedMulSumAddInPlaceParameters(
+    const RnsPolynomial<ModularInt>& a, const RnsPolynomial<ModularInt>& b,
+    const RnsPolynomial<ModularInt>& c,
+    absl::Span<const PrimeModulus<ModularInt>* const> moduli) {
+  if (!a.IsNttForm() || !b.IsNttForm() || !c.IsNttForm()) {
+    return absl::InvalidArgumentError(
+        "Polynomials `a`, `b`, and `c` must be in NTT form.");
+  }
+  int num_moduli = moduli.size();
+  if (a.NumModuli() != num_moduli || b.NumModuli() != num_moduli ||
+      c.NumModuli() != num_moduli || coeff_vectors_.size() != num_moduli) {
+    return absl::InvalidArgumentError(
+        "Polynomials `a`, `b`, `c`, and this must all be defined wrt `moduli`");
+  }
+  for (int i = 0; i < num_moduli; ++i) {
+    if (moduli[i]->ModParams()->log_modulus + 3 >= sizeof(Integer) * 8) {
+      return absl::InvalidArgumentError(
+          "Modulus is too large to perform fused multiply-sum-add.");
+    }
+  }
+  int num_coeffs = coeff_vectors_[0].size();
+  if (a.NumCoeffs() != num_coeffs || b.NumCoeffs() != num_coeffs ||
+      c.NumCoeffs() != num_coeffs) {
+    return absl::InvalidArgumentError(
+        "Polynomials `a`, `b`, and `c` must have the same number of "
+        "coefficients as this lazy polynomial.");
+  }
+  return absl::OkStatus();
+}
+
+template <typename ModularInt>
 absl::Status LazyRnsPolynomial<ModularInt>::FusedMulAddInPlace(
     const RnsPolynomial<ModularInt>& a, const RnsPolynomial<ModularInt>& b,
     absl::Span<const PrimeModulus<ModularInt>* const> moduli) {
@@ -113,6 +145,157 @@ absl::Status LazyRnsPolynomial<ModularInt64>::FusedMulAddInPlace(
   for (int i = 0; i < num_moduli; ++i) {
     internal::BatchFusedMulAddMontgomeryRep<Uint64>(
         a_coeff_vectors[i], b_coeff_vectors[i], coeff_vectors_[i]);
+  }
+  current_level_++;
+  return absl::OkStatus();
+}
+
+template <typename ModularInt>
+absl::Status LazyRnsPolynomial<ModularInt>::FusedMulSumAddInPlace(
+    const RnsPolynomial<ModularInt>& a, const RnsPolynomial<ModularInt>& b,
+    const RnsPolynomial<ModularInt>& c,
+    absl::Span<const PrimeModulus<ModularInt>* const> moduli) {
+  RLWE_RETURN_IF_ERROR(CheckFusedMulSumAddInPlaceParameters(a, b, c, moduli));
+  if (current_level_ == maximum_level_) {
+    Refresh(moduli);
+  }
+
+  int num_moduli = moduli.size();
+  int num_coeffs = coeff_vectors_[0].size();
+  const auto& a_coeff_vectors = a.Coeffs();
+  const auto& b_coeff_vectors = b.Coeffs();
+  const auto& c_coeff_vectors = c.Coeffs();
+  for (int i = 0; i < num_moduli; ++i) {
+    for (int j = 0; j < num_coeffs; ++j) {
+      coeff_vectors_[i][j] +=
+          static_cast<BigInt>(
+              a_coeff_vectors[i][j].GetMontgomeryRepresentation() +
+              b_coeff_vectors[i][j].GetMontgomeryRepresentation()) *
+          c_coeff_vectors[i][j].GetMontgomeryRepresentation();
+    }
+  }
+  current_level_++;
+  return absl::OkStatus();
+}
+
+template <>
+absl::Status LazyRnsPolynomial<ModularInt32>::FusedMulSumAddInPlace(
+    const RnsPolynomial<ModularInt32>& a, const RnsPolynomial<ModularInt32>& b,
+    const RnsPolynomial<ModularInt32>& c,
+    absl::Span<const PrimeModulus<ModularInt32>* const> moduli) {
+  RLWE_RETURN_IF_ERROR(CheckFusedMulSumAddInPlaceParameters(a, b, c, moduli));
+  if (current_level_ == maximum_level_) {
+    Refresh(moduli);
+  }
+
+  int num_moduli = moduli.size();
+  const auto& a_coeff_vectors = a.Coeffs();
+  const auto& b_coeff_vectors = b.Coeffs();
+  const auto& c_coeff_vectors = c.Coeffs();
+  for (int i = 0; i < num_moduli; ++i) {
+    internal::BatchFusedMulSumAddMontgomeryRep<Uint32>(
+        a_coeff_vectors[i], b_coeff_vectors[i], c_coeff_vectors[i],
+        coeff_vectors_[i]);
+  }
+  current_level_++;
+  return absl::OkStatus();
+}
+
+template <>
+absl::Status LazyRnsPolynomial<ModularInt64>::FusedMulSumAddInPlace(
+    const RnsPolynomial<ModularInt64>& a, const RnsPolynomial<ModularInt64>& b,
+    const RnsPolynomial<ModularInt64>& c,
+    absl::Span<const PrimeModulus<ModularInt64>* const> moduli) {
+  RLWE_RETURN_IF_ERROR(CheckFusedMulSumAddInPlaceParameters(a, b, c, moduli));
+  if (current_level_ == maximum_level_) {
+    Refresh(moduli);
+  }
+
+  int num_moduli = moduli.size();
+  const auto& a_coeff_vectors = a.Coeffs();
+  const auto& b_coeff_vectors = b.Coeffs();
+  const auto& c_coeff_vectors = c.Coeffs();
+  for (int i = 0; i < num_moduli; ++i) {
+    internal::BatchFusedMulSumAddMontgomeryRep<Uint64>(
+        a_coeff_vectors[i], b_coeff_vectors[i], c_coeff_vectors[i],
+        coeff_vectors_[i]);
+  }
+  current_level_++;
+  return absl::OkStatus();
+}
+
+template <typename ModularInt>
+absl::Status LazyRnsPolynomial<ModularInt>::FusedMulDifferenceAddInPlace(
+    const RnsPolynomial<ModularInt>& a, const RnsPolynomial<ModularInt>& b,
+    const RnsPolynomial<ModularInt>& c,
+    absl::Span<const PrimeModulus<ModularInt>* const> moduli) {
+  RLWE_RETURN_IF_ERROR(CheckFusedMulSumAddInPlaceParameters(a, b, c, moduli));
+  if (current_level_ == maximum_level_) {
+    Refresh(moduli);
+  }
+
+  int num_moduli = moduli.size();
+  int num_coeffs = coeff_vectors_[0].size();
+  const auto& a_coeff_vectors = a.Coeffs();
+  const auto& b_coeff_vectors = b.Coeffs();
+  const auto& c_coeff_vectors = c.Coeffs();
+  for (int i = 0; i < num_moduli; ++i) {
+    const auto qi = moduli[i]->Modulus();
+    for (int j = 0; j < num_coeffs; ++j) {
+      coeff_vectors_[i][j] +=
+          static_cast<BigInt>(
+              a_coeff_vectors[i][j].GetMontgomeryRepresentation() + qi -
+              b_coeff_vectors[i][j].GetMontgomeryRepresentation()) *
+          c_coeff_vectors[i][j].GetMontgomeryRepresentation();
+    }
+  }
+  current_level_++;
+  return absl::OkStatus();
+}
+
+template <>
+absl::Status LazyRnsPolynomial<ModularInt32>::FusedMulDifferenceAddInPlace(
+    const RnsPolynomial<ModularInt32>& a, const RnsPolynomial<ModularInt32>& b,
+    const RnsPolynomial<ModularInt32>& c,
+    absl::Span<const PrimeModulus<ModularInt32>* const> moduli) {
+  RLWE_RETURN_IF_ERROR(CheckFusedMulSumAddInPlaceParameters(a, b, c, moduli));
+  if (current_level_ == maximum_level_) {
+    Refresh(moduli);
+  }
+
+  int num_moduli = moduli.size();
+  const auto& a_coeff_vectors = a.Coeffs();
+  const auto& b_coeff_vectors = b.Coeffs();
+  const auto& c_coeff_vectors = c.Coeffs();
+  for (int i = 0; i < num_moduli; ++i) {
+    const auto qi = moduli[i]->Modulus();
+    internal::BatchFusedMulDifferenceAddMontgomeryRep<Uint32>(
+        a_coeff_vectors[i], b_coeff_vectors[i], c_coeff_vectors[i], qi,
+        coeff_vectors_[i]);
+  }
+  current_level_++;
+  return absl::OkStatus();
+}
+
+template <>
+absl::Status LazyRnsPolynomial<ModularInt64>::FusedMulDifferenceAddInPlace(
+    const RnsPolynomial<ModularInt64>& a, const RnsPolynomial<ModularInt64>& b,
+    const RnsPolynomial<ModularInt64>& c,
+    absl::Span<const PrimeModulus<ModularInt64>* const> moduli) {
+  RLWE_RETURN_IF_ERROR(CheckFusedMulSumAddInPlaceParameters(a, b, c, moduli));
+  if (current_level_ == maximum_level_) {
+    Refresh(moduli);
+  }
+
+  int num_moduli = moduli.size();
+  const auto& a_coeff_vectors = a.Coeffs();
+  const auto& b_coeff_vectors = b.Coeffs();
+  const auto& c_coeff_vectors = c.Coeffs();
+  for (int i = 0; i < num_moduli; ++i) {
+    const auto qi = moduli[i]->Modulus();
+    internal::BatchFusedMulDifferenceAddMontgomeryRep<Uint64>(
+        a_coeff_vectors[i], b_coeff_vectors[i], c_coeff_vectors[i], qi,
+        coeff_vectors_[i]);
   }
   current_level_++;
   return absl::OkStatus();
