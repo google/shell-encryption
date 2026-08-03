@@ -51,7 +51,6 @@ rlwe::StatusOr<ModularInt> PrimitiveNthRootOfUnity(
 
   // Test each number t to see whether t^k is a primitive n-th root
   // of unity - that t^{nk} is a root of unity but t^{(n/2)k} is not.
-  ModularInt one = ModularInt::ImportOne(params);
   for (typename ModularInt::Int t = params->Two(); t < params->modulus;
        t = t + params->One()) {
     // Produce a candidate root of unity.
@@ -60,7 +59,7 @@ rlwe::StatusOr<ModularInt> PrimitiveNthRootOfUnity(
 
     // Check whether candidate^half_n = 1. If not, it is a primitive root of
     // unity.
-    if (candidate.ModExp(half_n, params) != one) {
+    if (candidate.ModExp(half_n, params).ExportInt(params) != 1) {
       return candidate;
     }
   }
