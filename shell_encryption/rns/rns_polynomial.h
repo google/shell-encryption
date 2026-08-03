@@ -103,6 +103,13 @@ class RnsPolynomial {
     if (log_n <= 0) {
       return absl::InvalidArgumentError("`log_n` must be positive.");
     }
+    // Validate that log_n is within safe range for bit shift operation.
+    // For signed 32-bit int, shifting left by 31 or more causes undefined
+    // behavior and potential integer overflow.
+    if (log_n >= 31) {
+      return absl::InvalidArgumentError(absl::StrCat(
+          "`log_n` must be less than 31, got ", log_n));
+    }
     int num_coeff_vectors = serialized.coeff_vectors_size();
     if (num_coeff_vectors != moduli.size()) {
       return absl::InvalidArgumentError(absl::StrCat(
