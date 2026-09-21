@@ -884,18 +884,18 @@ TYPED_TEST(MontgomeryTest, BatchOperations) {
       std::vector<TypeParam> expected_add, expected_sub, expected_mul,
           expected_fma;
       TypeParam scalar =
-          TypeParam::ImportRandom(prng.get(), modulus_params.get()).value();
+          TypeParam::ImportRandom(prng, modulus_params.get()).value();
       auto [scalar_constant, scalar_constant_barrett] =
           scalar.GetConstant(modulus_params.get());
       std::vector<TypeParam> expected_add_scalar, expected_sub_scalar,
           expected_mul_scalar;
       for (size_t i = 0; i < length; i++) {
         a.push_back(
-            TypeParam::ImportRandom(prng.get(), modulus_params.get()).value());
+            TypeParam::ImportRandom(prng, modulus_params.get()).value());
         b.push_back(
-            TypeParam::ImportRandom(prng.get(), modulus_params.get()).value());
+            TypeParam::ImportRandom(prng, modulus_params.get()).value());
         c.push_back(
-            TypeParam::ImportRandom(prng.get(), modulus_params.get()).value());
+            TypeParam::ImportRandom(prng, modulus_params.get()).value());
         auto [constant, constant_barrett] =
             b[i].GetConstant(modulus_params.get());
         b_constant.push_back(constant);
