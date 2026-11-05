@@ -165,8 +165,12 @@ class RnsErrorParams {
            (sqrt(3.0 * dimension) + 8.0 * dimension * sqrt(1 / 3.0));
   }
 
-  // Returns ceil(plaintext modulus).
-  double ExportDoubleT() const { return std::pow(log_plaintext_modulus_, 2); }
+  // Returns an upper bound on the plaintext modulus t, assuming
+  // `log_plaintext_modulus_` is ceil(log2(t)) as documented below. The
+  // additional 1 matches ErrorParams, whose plaintext modulus is 2^log_t + 1.
+  double ExportDoubleT() const {
+    return std::ldexp(1.0, log_plaintext_modulus_) + 1.0;
+  }
 
   int log_n_;
   std::vector<int> log_main_prime_moduli_;

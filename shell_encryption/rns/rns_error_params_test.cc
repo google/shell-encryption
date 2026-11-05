@@ -228,5 +228,39 @@ TYPED_TEST(RnsErrorParamsTest, SecretKeyEncryptionBoundIsValid) {
   }
 }
 
+TYPED_TEST(RnsErrorParamsTest, BoundsScaleWithPlaintextModulus) {
+  int log_n = this->rns_context_->LogN();
+  const double dimension = 1 << log_n;
+  const double sigma = sqrt(kVariance);
+  for (int log_t : {1, 2, 16, 32, 40}) {
+    ASSERT_OK_AND_ASSIGN(
+        auto error_params,
+        RnsErrorParams<TypeParam>::Create(log_n, this->main_moduli_,
+                                          this->aux_moduli_, log_t, sigma));
+    // The bounds scale with the plaintext modulus t <= 2^log_t (+1), not with
+    // log_t.
+    const double t_bound = std::ldexp(1.0, log_t) + 1.0;
+    EXPECT_DOUBLE_EQ(error_params.B_plaintext(),
+                     t_bound * sqrt(3.0 * dimension));
+    EXPECT_DOUBLE_EQ(error_params.B_secretkey_encryption(),
+                     t_bound * sqrt(dimension) * (sqrt(3.0) + 6.0 * sigma));
+    EXPECT_GE(error_params.B_publickey_encryption(),
+              t_bound * 72 * dimension * sigma * sigma);
+    EXPECT_GE(error_params.B_scale(), t_bound * sqrt(3.0 * dimension));
+  }
+}
+
+TYPED_TEST(RnsErrorParamsTest, PlaintextBoundCoversPlaintextModulus) {
+  int log_n = this->rns_context_->LogN();
+  const double dimension = 1 << log_n;
+  const double t = static_cast<double>(this->rns_context_->PlaintextModulus());
+  const int ceil_log_t = static_cast<int>(std::ceil(std::log2(t)));
+  ASSERT_OK_AND_ASSIGN(auto error_params,
+                       RnsErrorParams<TypeParam>::Create(
+                           log_n, this->main_moduli_, this->aux_moduli_,
+                           ceil_log_t, sqrt(kVariance)));
+  EXPECT_GE(error_params.B_plaintext(), t * sqrt(3.0 * dimension));
+}
+
 }  // namespace
 }  // namespace rlwe
