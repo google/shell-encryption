@@ -74,6 +74,12 @@ class RnsRlweCiphertext {
     if (error_params == nullptr) {
       return absl::InvalidArgumentError("`error_params` must not be null.");
     }
+    // Validate that components is not empty to prevent crashes in downstream
+    // metadata calls like LogN() that access components_[0].
+    if (serialized.components_size() <= 0) {
+      return absl::InvalidArgumentError(
+          "`components` must not be empty.");
+    }
     std::vector<RnsPolynomial<ModularInt>> components;
     components.reserve(serialized.components_size());
     for (int i = 0; i < serialized.components_size(); ++i) {
