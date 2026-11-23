@@ -111,13 +111,13 @@ std::vector<std::vector<BigInteger>> PackMessages(
       num_packed_coeffs, num_coeffs_per_packed_vector);
   std::vector<std::vector<BigInteger>> all_packed_messages(num_packed_vectors);
   auto packed_messages_it = packed_messages.begin();
-  for (int i = 0; i < num_packed_vectors;
-       ++i, packed_messages_it += num_coeffs_per_packed_vector) {
+  for (int i = 0; i < num_packed_vectors; ++i) {
+    const int chunk_size =
+        std::min(num_coeffs_per_packed_vector, num_packed_coeffs);
     all_packed_messages[i].resize(num_coeffs_per_packed_vector, 0);
-    std::copy_n(packed_messages_it,
-                std::min(num_coeffs_per_packed_vector, num_packed_coeffs),
-                all_packed_messages[i].begin());
-    num_packed_coeffs -= num_coeffs_per_packed_vector;
+    std::copy_n(packed_messages_it, chunk_size, all_packed_messages[i].begin());
+    packed_messages_it += chunk_size;
+    num_packed_coeffs -= chunk_size;
   }
   return all_packed_messages;
 }
